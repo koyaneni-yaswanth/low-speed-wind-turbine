@@ -1,0 +1,33 @@
+# System & Editor Artifacts
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# Temporary Office Lock Files
+~$*.pptx
+~$*.docx
+~$*.xlsx
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.pkl
+*.joblib
+
+# Temporary extraction / scratch
+_extracted*/
+scratch/
+tmp/
+
+# Machine-specific toolpaths (G-code)
+*.gcode
+
+# Sensitive / Legal Agreements containing personal identity numbers (PAN/Aadhaar)
+*Draft Pre - Incubation Agreement*
+
+# Third-party copyrighted textbooks
+*z-lib*

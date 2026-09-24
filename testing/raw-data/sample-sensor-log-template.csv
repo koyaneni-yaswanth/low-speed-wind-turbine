@@ -1,0 +1,13 @@
+Timestamp,Config_ID,Voltage_V,Current_A,Power_W,Rotor_RPM,Wind_Speed_ms,Wind_Direction,Vib_XYZ_g,Notes
+2026-07-29 09:00:01,A,12.4,2.10,26.04,310,4.2,NE,0.02/0.01/0.03,Steady morning breeze; resistive load 5.9 ohm
+2026-07-29 09:00:15,A,12.6,2.13,26.84,315,4.3,NE,0.02/0.01/0.03,Nominal tracking
+2026-07-29 09:00:30,A,11.8,2.00,23.60,295,3.9,NE,0.02/0.01/0.03,Minor wind drop
+2026-07-29 09:15:22,A,7.2,0.85,6.12,185,2.4,NNE,0.01/0.01/0.02,Approaching cut-in boundary
+2026-07-29 09:30:10,A,0.0,0.00,0.00,0,1.9,NNE,0.00/0.00/0.01,Stalled below static starting threshold
+2026-07-29 10:05:44,A,10.6,1.65,17.49,265,3.5,NE,0.02/0.01/0.02,Re-acceleration after gust
+2026-07-29 10:45:18,A,15.8,2.80,44.24,390,5.1,ENE,0.04/0.03/0.05,Strong gust; peak load test
+2026-07-29 11:30:00,B,7.8,0.95,7.41,195,2.5,ENE,0.02/0.02/0.03,Rotated to Config B (4-Rotor); cut-in active
+2026-07-29 11:45:12,B,11.4,1.85,21.09,285,3.5,E,0.02/0.02/0.03,Config B stable synchronization
+2026-07-29 12:00:30,B,14.5,2.50,36.25,360,4.5,E,0.03/0.03/0.04,Config B higher torque observed
+2026-07-29 14:00:10,C,5.1,0.50,2.55,140,2.8,E,0.05/0.04/0.06,Rotated to Config C (5-Rotor); high mesh drag
+2026-07-29 14:15:45,C,8.9,1.10,9.79,210,3.6,ESE,0.06/0.05/0.07,Config C meshing friction audible
