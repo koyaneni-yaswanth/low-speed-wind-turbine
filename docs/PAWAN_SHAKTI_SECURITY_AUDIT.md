@@ -1,0 +1,21 @@
+# PAWAN SHAKTI — Security, Safety & Privacy Audit (`Phase 0`)
+
+## 1. Security Threat Model & Controls
+
+| Threat Vector | Mitigation Design | Verification Requirement |
+| :--- | :--- | :--- |
+| **Unauthorized Access to Admin / CRM / Financials** | Supabase Auth JWT validation on `/api/admin`, `/api/inquiries` (GET/PATCH), and `/api/telemetry` (private read/upload) + least-privilege PostgreSQL RLS | Automated tests verifying `401 Unauthorized` & `403 Forbidden` for anonymous/wrong-role tokens |
+| **Privilege Escalation Across Roles** | Explicit 6-role RBAC: `founder_super_admin`, `engineering_admin`, `crm_admin`, `team_member`, `external_reviewer`, `public_visitor`. `team_member` cannot view CRM PII or restricted financial models | RBAC permission matrix unit test covering every role x table operation |
+| **Exposed Secrets in Frontend Bundle** | Strict separation: ONLY `VITE_SUPABASE_URL` & `VITE_SUPABASE_ANON_KEY` allowed in `src/`; `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, and device secrets strictly server-side | Regex secret hygiene test scanning built `dist/` and `src/` |
+| **Telemetry Spoofing / Replay Attacks** | Device ingestion (`/api/telemetry`) requires `X-Device-Id`, `X-Device-Timestamp` (<=300s skew), unique `(device_id, timestamp, sequence_no)`, and `HMAC-SHA256` verification against server-side hashed device keys | Unit/API test checking tampered HMAC, stale timestamp, malformed units, and duplicate replay rejection |
+| **Public Form Spam & XSS/Injection** | Zod schema validation on client + server, honeypot hidden field, payload size caps, rate limiting headers/tracking, React safe rendering (no `dangerouslySetInnerHTML`) | Negative input & injection fuzz tests on `/api/inquiries` |
+| **Sensitive Legal / PII Document Exposure** | Asset sync script `sync-repo-assets.mjs` excludes `.docx` and any agreement files matching `*Pre - Incubation*`; Private Data Room items require `visibility = 'private'` + role check | Automated check verifying zero PII docs in `public/repo-assets/` |
+| **Fake Connected / Success States** | Missing cloud credentials yield honest HTTP `503` diagnostic states and explicit UI setup banners — never simulated `200 OK` form or email receipts | Integration tests running against unconfigured env verifying `503` & non-simulated notifications |
+
+---
+
+## 2. Physical Hardware Safety Boundary (Non-Negotiable)
+
+- **Zero Remote Control Surfaces:** Neither the public website nor the authenticated engineering dashboard implements remote turbine start, brake release, yaw actuation, or pitch override commands.
+- **Monitoring Only:** `brake_state`, `fault_code`, `temperature`, and overspeed indicators are strictly **read-only telemetry observability fields** until an independently reviewed safety controller architecture is approved.
+- **No Unverified Safety Certifications:** Website never claims IEC 61400-2 certification, IP65 storm certification, or utility grid-tie compliance.
