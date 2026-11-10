@@ -31,3 +31,15 @@ tmp/
 
 # Third-party copyrighted textbooks
 *z-lib*
+
+# Platform Build, Dependencies & Environment
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+public/repo-assets/
+src/generated/
+playwright-report/
+test-results/
+

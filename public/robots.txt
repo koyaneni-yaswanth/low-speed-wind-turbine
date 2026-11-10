@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /api/
+
+Sitemap: https://github.com/koyaneni-yaswanth/low-speed-wind-turbine/sitemap.xml
