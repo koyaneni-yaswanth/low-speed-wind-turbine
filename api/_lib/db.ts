@@ -74,6 +74,17 @@ export function getAllowedOrigins(): Set<string> {
   if (vercelUrl) {
     allowed.add(`https://${vercelUrl.replace(/^https?:\/\//, '')}`);
   }
+  const extraOrigins = process.env.ALLOWED_ORIGINS || '';
+  for (const item of extraOrigins.split(',')) {
+    const trimmed = item.trim();
+    if (trimmed && trimmed.startsWith('http')) {
+      try {
+        allowed.add(new URL(trimmed).origin);
+      } catch {
+        // ignore malformed origin entry
+      }
+    }
+  }
   return allowed;
 }
 
@@ -83,7 +94,7 @@ export function applyCors(req: ServerRequest, res: ServerResponse, requestId: st
   const origin = getHeaderValue(req.headers, 'origin').trim();
   if (origin) {
     const allowed = getAllowedOrigins();
-    const isPreviewBranchOrigin = /^https:\/\/pawan-shakti-[a-z0-9-]+\.vercel\.app$/i.test(origin);
+    const isPreviewBranchOrigin = /^https:\/\/pawan-shakti(?:-[a-z0-9-]+)*\.vercel\.app$/i.test(origin);
     if (!allowed.has(origin) && !isPreviewBranchOrigin) {
       res.status(403).json({ error: 'Cross-origin request rejected by CORS policy.', requestId });
       return { handled: true, rejected: true };
@@ -103,6 +114,10 @@ export function parseJsonBody(
   req: ServerRequest,
   maxBytes = 131_072
 ): { ok: true; data: Record<string, any> } | { ok: false; status: number; error: string } {
+  const contentType = getHeaderValue(req.headers, 'content-type').trim().toLowerCase();
+  if ((req.method === 'POST' || req.method === 'PATCH') && contentType && !contentType.includes('application/json')) {
+    return { ok: false, status: 415, error: 'Unsupported Media Type: Content-Type must be application/json.' };
+  }
   if (req.body === undefined || req.body === null || req.body === '') {
     return { ok: true, data: {} };
   }

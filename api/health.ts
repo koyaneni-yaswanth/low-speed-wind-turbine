@@ -31,13 +31,30 @@ export default async function handler(req: ServerRequest, res: ServerResponse) {
   }
 
   const emailProviderConfigured = Boolean(process.env.RESEND_API_KEY && process.env.NOTIFICATION_FROM_EMAIL);
+  const viteUrl = process.env.VITE_SUPABASE_URL || '';
+  const viteAnon = process.env.VITE_SUPABASE_ANON_KEY || '';
+  const authConfigured = Boolean(
+    viteUrl &&
+      viteAnon &&
+      viteUrl.startsWith('https://') &&
+      !viteUrl.includes('your-project-ref')
+  );
+  const configStatus = !configured
+    ? 'configuration_incomplete'
+    : dbReachable
+    ? 'configured_healthy'
+    : 'db_unreachable';
 
   res.status(configured && dbReachable ? 200 : 503).json({
     ok: configured && dbReachable,
+    applicationAvailable: true,
     supabaseConfigured: configured,
     dbReachable,
+    authConfigured,
     emailProviderConfigured,
+    configStatus,
     trlStage: 'TRL 4',
+    requestId,
     message: configured
       ? dbReachable
         ? 'Backend connected cleanly.'

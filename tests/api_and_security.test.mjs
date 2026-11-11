@@ -10,6 +10,7 @@ import { createTelemetryHandler } from '../api/telemetry.ts';
 import { createAdminHandler } from '../api/admin.ts';
 import { createNotificationsHandler } from '../api/notifications.ts';
 import { createAnalyticsHandler } from '../api/analytics.ts';
+import healthHandler from '../api/health.ts';
 
 function createMockRes() {
   return {
@@ -604,5 +605,35 @@ test('Phase 6 & Phase 12 Hardening: rejects oversized packets (413), blocks unau
   const webpSize = fs.statSync(path.join(process.cwd(), 'public/optimized/mark-4-four-rotor-prototype.webp')).size;
   const origSize = fs.statSync(path.join(process.cwd(), 'media/prototype/mark-4-four-rotor-prototype.png')).size;
   assert.ok(webpSize > 10_000 && webpSize < origSize * 0.25, 'Optimized Mark-4 WebP must exist and be < 25% of raw PNG');
+
+  // Content-Type 415 enforcement & ALLOWED_ORIGINS check & Health diagnostic breakdown
+  const ctRes = createMockRes();
+  await adm(
+    {
+      method: 'POST',
+      headers: { authorization: 'Bearer tok-eng', 'content-type': 'text/plain' },
+      body: '{}',
+    },
+    ctRes
+  );
+  assert.equal(ctRes.statusCode, 415);
+
+  process.env.ALLOWED_ORIGINS = 'https://custom-review.pawan-shakti.example';
+  const customCorsRes = createMockRes();
+  await adm(
+    {
+      method: 'OPTIONS',
+      headers: { origin: 'https://custom-review.pawan-shakti.example' },
+    },
+    customCorsRes
+  );
+  assert.equal(customCorsRes.statusCode, 204);
+  delete process.env.ALLOWED_ORIGINS;
+
+  const hRes = createMockRes();
+  await healthHandler({ method: 'GET', headers: {} }, hRes);
+  assert.equal(hRes.statusCode, 503);
+  assert.equal(hRes.payload.applicationAvailable, true);
+  assert.equal(hRes.payload.configStatus, 'configuration_incomplete');
 });
 
