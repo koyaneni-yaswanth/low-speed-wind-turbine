@@ -24,11 +24,16 @@ export const Footer: React.FC = () => {
         <div className="grid gap-8 md:grid-cols-4">
           <div className="md:col-span-2 space-y-3">
             <div className="flex items-center gap-3">
-              <img
-                src="/repo-assets/media/hero/pawan-shakti-logo.jpeg"
-                alt="Pawan Shakti crest"
-                className="h-9 w-auto rounded object-contain"
-              />
+              <picture>
+                <source srcSet="/optimized/pawan-shakti-logo.webp" type="image/webp" />
+                <img
+                  src="/repo-assets/media/hero/pawan-shakti-logo.jpeg"
+                  alt="Pawan Shakti crest"
+                  loading="lazy"
+                  decoding="async"
+                  className="h-9 w-auto rounded object-contain"
+                />
+              </picture>
               <div>
                 <div className={`font-display text-base font-bold ${isDark ? 'text-white' : 'text-[#0B2B22]'}`}>
                   PAWAN SHAKTI

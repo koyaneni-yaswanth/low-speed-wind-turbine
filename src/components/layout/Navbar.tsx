@@ -28,11 +28,15 @@ export const Navbar: React.FC = () => {
     >
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
         <Link to="/" className="flex items-center gap-3 shrink-0" onClick={() => setOpen(false)}>
-          <img
-            src="/repo-assets/media/hero/pawan-shakti-logo.jpeg"
-            alt="Pawan Shakti logo"
-            className="h-9 w-auto rounded object-contain"
-          />
+          <picture>
+            <source srcSet="/optimized/pawan-shakti-logo.webp" type="image/webp" />
+            <img
+              src="/repo-assets/media/hero/pawan-shakti-logo.jpeg"
+              alt="Pawan Shakti logo"
+              decoding="async"
+              className="h-9 w-auto rounded object-contain"
+            />
+          </picture>
           <div className="hidden sm:block leading-tight">
             <div className={`font-display text-sm font-extrabold tracking-tight ${isDark ? 'text-white' : 'text-[#0B2B22]'}`}>
               PAWAN SHAKTI

@@ -554,3 +554,55 @@ test('Phase 2-6 Cloud Hardening: Storage RLS SQL, Telemetry DB Mappers, Auth Flo
   assert.ok(!String(failRes.payload.error).includes('secret_internal_constraint'));
 });
 
+test('Phase 6 & Phase 12 Hardening: rejects oversized packets (413), blocks unauthorized CORS (403), and lazy-loads routes/WebP assets', async () => {
+  const actors = { 'tok-eng': { userId: 'u-eng', email: 'eng@pawanshakti.local', role: 'engineering_admin' } };
+  const { adapter } = createInMemoryDb(actors);
+  const tel = createTelemetryHandler(() => adapter);
+  const adm = createAdminHandler(() => adapter);
+
+  // Oversized telemetry packet > 32 KB -> 413
+  const bigRes = createMockRes();
+  await tel(
+    {
+      method: 'POST',
+      headers: { 'x-device-id': 'ESP32-PS-01' },
+      body: JSON.stringify({ junk: 'x'.repeat(40_000) }),
+    },
+    bigRes
+  );
+  assert.equal(bigRes.statusCode, 413);
+
+  // Disallowed external Origin rejected cleanly with 403 CORS policy
+  const badOriginRes = createMockRes();
+  await adm(
+    {
+      method: 'GET',
+      headers: { authorization: 'Bearer tok-eng', origin: 'https://evil-phish.example' },
+    },
+    badOriginRes
+  );
+  assert.equal(badOriginRes.statusCode, 403);
+
+  // Allowed localhost origin OPTIONS preflight returns 204
+  const preflightRes = createMockRes();
+  await adm(
+    {
+      method: 'OPTIONS',
+      headers: { origin: 'http://localhost:5174' },
+    },
+    preflightRes
+  );
+  assert.equal(preflightRes.statusCode, 204);
+
+  // Route-level code splitting & WebP optimization checks
+  const appTsx = fs.readFileSync(path.join(process.cwd(), 'src/App.tsx'), 'utf-8');
+  assert.ok(appTsx.includes("lazy(() => import('./pages/HomePage.tsx')"));
+  assert.ok(appTsx.includes("lazy(() => import('./pages/AdminPortalPage.tsx')"));
+  const techTsx = fs.readFileSync(path.join(process.cwd(), 'src/pages/TechnologyPage.tsx'), 'utf-8');
+  assert.ok(techTsx.includes("lazy(() =>"));
+  assert.ok(techTsx.includes("ModelViewer3D"));
+  const webpSize = fs.statSync(path.join(process.cwd(), 'public/optimized/mark-4-four-rotor-prototype.webp')).size;
+  const origSize = fs.statSync(path.join(process.cwd(), 'media/prototype/mark-4-four-rotor-prototype.png')).size;
+  assert.ok(webpSize > 10_000 && webpSize < origSize * 0.25, 'Optimized Mark-4 WebP must exist and be < 25% of raw PNG');
+});
+

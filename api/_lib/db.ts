@@ -50,25 +50,84 @@ export function getClientIp(req: ServerRequest): string {
   return getHeaderValue(req.headers, 'x-real-ip') || 'local';
 }
 
-export function parseJsonBody(req: ServerRequest): { ok: true; data: Record<string, any> } | { ok: false; error: string } {
+export function getOrCreateRequestId(req: ServerRequest): string {
+  const existing = getHeaderValue(req.headers, 'x-request-id').trim();
+  return existing || `req_${crypto.randomBytes(6).toString('hex')}`;
+}
+
+export function getAllowedOrigins(): Set<string> {
+  const allowed = new Set<string>([
+    'http://localhost:5174',
+    'http://127.0.0.1:5174',
+    'http://localhost:4174',
+    'http://127.0.0.1:4174',
+  ]);
+  const appUrl = process.env.VITE_APP_URL?.trim();
+  if (appUrl && appUrl.startsWith('http')) {
+    try {
+      allowed.add(new URL(appUrl).origin);
+    } catch {
+      // ignore malformed env URL
+    }
+  }
+  const vercelUrl = process.env.VERCEL_URL?.trim();
+  if (vercelUrl) {
+    allowed.add(`https://${vercelUrl.replace(/^https?:\/\//, '')}`);
+  }
+  return allowed;
+}
+
+export function applyCors(req: ServerRequest, res: ServerResponse, requestId: string): { handled: boolean; rejected: boolean } {
+  res.setHeader?.('Vary', 'Origin');
+  res.setHeader?.('X-Request-Id', requestId);
+  const origin = getHeaderValue(req.headers, 'origin').trim();
+  if (origin) {
+    const allowed = getAllowedOrigins();
+    const isPreviewBranchOrigin = /^https:\/\/pawan-shakti-[a-z0-9-]+\.vercel\.app$/i.test(origin);
+    if (!allowed.has(origin) && !isPreviewBranchOrigin) {
+      res.status(403).json({ error: 'Cross-origin request rejected by CORS policy.', requestId });
+      return { handled: true, rejected: true };
+    }
+    res.setHeader?.('Access-Control-Allow-Origin', origin);
+    res.setHeader?.('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
+    res.setHeader?.('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Device-Id, X-Device-Timestamp, X-Device-Nonce, X-Device-Signature, X-Request-Id');
+  }
+  if (req.method === 'OPTIONS') {
+    res.status(204).json({ ok: true });
+    return { handled: true, rejected: false };
+  }
+  return { handled: false, rejected: false };
+}
+
+export function parseJsonBody(
+  req: ServerRequest,
+  maxBytes = 131_072
+): { ok: true; data: Record<string, any> } | { ok: false; status: number; error: string } {
   if (req.body === undefined || req.body === null || req.body === '') {
     return { ok: true, data: {} };
   }
   if (typeof req.body === 'string') {
+    if (Buffer.byteLength(req.body, 'utf8') > maxBytes) {
+      return { ok: false, status: 413, error: `Request payload exceeds ${maxBytes} byte limit.` };
+    }
     try {
       const parsed = JSON.parse(req.body);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         return { ok: true, data: parsed as Record<string, any> };
       }
-      return { ok: false, error: 'JSON request body must be an object.' };
+      return { ok: false, status: 400, error: 'JSON request body must be an object.' };
     } catch {
-      return { ok: false, error: 'Malformed JSON in request body.' };
+      return { ok: false, status: 400, error: 'Malformed JSON in request body.' };
     }
   }
   if (typeof req.body === 'object' && !Array.isArray(req.body)) {
+    const serializedBytes = Buffer.byteLength(JSON.stringify(req.body), 'utf8');
+    if (serializedBytes > maxBytes) {
+      return { ok: false, status: 413, error: `Request payload exceeds ${maxBytes} byte limit.` };
+    }
     return { ok: true, data: req.body as Record<string, any> };
   }
-  return { ok: false, error: 'Unsupported request body format.' };
+  return { ok: false, status: 400, error: 'Unsupported request body format.' };
 }
 
 export function escapeHtml(input: string): string {
@@ -234,10 +293,10 @@ export function verifyDeviceHmacSignature(params: {
   return { valid: true };
 }
 
-export function safeServerError(res: ServerResponse, context: string, rawError: unknown, status = 500): void {
+export function safeServerError(res: ServerResponse, context: string, rawError: unknown, status = 500, requestId?: string): void {
   const detail = rawError instanceof Error ? rawError.message : String(rawError || 'unknown');
-  console.error(`[pawan-shakti][${context}]`, detail);
-  res.status(status).json({ error: 'Internal server database operation failed.' });
+  console.error(`[pawan-shakti][${context}]${requestId ? `[${requestId}]` : ''}`, detail);
+  res.status(status).json({ error: 'Internal server database operation failed.', ...(requestId ? { requestId } : {}) });
 }
 
 export function requirePermission(actor: AuthenticatedActor | null, scope: PermissionScope): { ok: true } | { ok: false; status: number; error: string } {

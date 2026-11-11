@@ -163,11 +163,19 @@ export const EngineeringTimeline: React.FC = () => {
         <div className="grid gap-6 lg:grid-cols-12 rounded-xl border border-slate-800 bg-[#0B1528] p-5">
           <div className="lg:col-span-5 min-w-0">
             {active.image ? (
-              <img
-                src={active.image}
-                alt={active.phase}
-                className="aspect-[4/3] w-full rounded-xl object-cover border border-slate-700"
-              />
+              <picture>
+                <source
+                  srcSet={`/optimized/${active.image.split('/').pop()?.replace(/\.(png|jpg|jpeg)$/i, '.webp')}`}
+                  type="image/webp"
+                />
+                <img
+                  src={active.image}
+                  alt={active.phase}
+                  loading="lazy"
+                  decoding="async"
+                  className="aspect-[4/3] w-full rounded-xl object-cover border border-slate-700"
+                />
+              </picture>
             ) : (
               <div className="aspect-[4/3] flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-700 bg-[#060D1A] p-4 text-center text-xs text-slate-400">
                 <span className="font-mono text-cyan-300 mb-1">CONCEPT / DEVELOPMENT PHASE</span>

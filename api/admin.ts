@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import {
+  applyCors,
+  checkRateLimit,
   createSupabaseDbAdapter,
+  getClientIp,
+  getOrCreateRequestId,
   parseJsonBody,
   recordAuditLog,
   requirePermission,
@@ -56,22 +60,32 @@ const turbineSchema = z.object({
 
 export function createAdminHandler(dbFactory: () => DbAdapter = createSupabaseDbAdapter) {
   return async function handler(req: ServerRequest, res: ServerResponse) {
+    const requestId = getOrCreateRequestId(req);
+    const cors = applyCors(req, res, requestId);
+    if (cors.handled) return;
+
+    const rate = checkRateLimit(`adm:${getClientIp(req)}`, 120, 60_000);
+    if (!rate.allowed) {
+      return res.status(429).json({ error: `Rate limit exceeded. Retry in ${rate.retryAfterSec}s.`, requestId });
+    }
+
     const db = dbFactory();
     if (!db.isConfigured()) {
       return res.status(503).json({
         error: 'Database unconfigured',
         message: 'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not configured on this server.',
+        requestId,
       });
     }
 
     const actor = await db.resolveActor(req);
     if (!actor) {
-      return res.status(401).json({ error: 'Authentication required.' });
+      return res.status(401).json({ error: 'Authentication required.', requestId });
     }
 
-    const bodyParse = parseJsonBody(req);
+    const bodyParse = parseJsonBody(req, 131_072);
     if (!bodyParse.ok) {
-      return res.status(400).json({ error: bodyParse.error });
+      return res.status(bodyParse.status).json({ error: bodyParse.error, requestId });
     }
     const body = bodyParse.data;
     const action = String(body.action || req.query?.action || '');

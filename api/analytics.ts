@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import {
+  applyCors,
+  checkRateLimit,
   createSupabaseDbAdapter,
+  getClientIp,
+  getOrCreateRequestId,
   parseJsonBody,
   requirePermission,
   safeServerError,
@@ -19,17 +23,26 @@ const eventSchema = z.object({
 
 export function createAnalyticsHandler(dbFactory: () => DbAdapter = createSupabaseDbAdapter) {
   return async function handler(req: ServerRequest, res: ServerResponse) {
+    const requestId = getOrCreateRequestId(req);
+    const cors = applyCors(req, res, requestId);
+    if (cors.handled) return;
+
     const db = dbFactory();
     if (!db.isConfigured()) {
       return res.status(503).json({
         error: 'Analytics persistence unconfigured',
         message: 'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not set.',
+        requestId,
       });
     }
 
     if (req.method === 'POST') {
-      const bodyParse = parseJsonBody(req);
-      if (!bodyParse.ok) return res.status(400).json({ error: bodyParse.error });
+      const rate = checkRateLimit(`ana:${getClientIp(req)}`, 120, 60_000);
+      if (!rate.allowed) {
+        return res.status(429).json({ error: `Rate limit exceeded. Retry in ${rate.retryAfterSec}s.`, requestId });
+      }
+      const bodyParse = parseJsonBody(req, 16_384);
+      if (!bodyParse.ok) return res.status(bodyParse.status).json({ error: bodyParse.error, requestId });
       const parsed = eventSchema.safeParse(bodyParse.data);
       if (!parsed.success) {
         return res.status(400).json({ error: 'Invalid analytics event payload.' });

@@ -3,10 +3,12 @@ import { ASSET_MANIFEST } from '../data/pawanShaktiData.ts';
 import type { CadAssetItem } from '../types/index.ts';
 import { applyRouteSeo } from '../lib/seo.ts';
 import { AirfoilPlot } from '../components/charts/AirfoilPlot.tsx';
-import { ModelViewer3D } from '../components/cad/ModelViewer3D.tsx';
 import { EvidenceBadge } from '../components/common/EvidenceBadge.tsx';
 import { AnimationBoundary } from '../components/animation/AnimationBoundary.tsx';
 
+const ModelViewer3D = lazy(() =>
+  import('../components/cad/ModelViewer3D.tsx').then((m) => ({ default: m.ModelViewer3D }))
+);
 const TurbineScene = lazy(() =>
   import('../components/three/TurbineScene.tsx').then((m) => ({ default: m.TurbineScene }))
 );
@@ -239,7 +241,17 @@ export const TechnologyPage: React.FC = () => {
           </div>
 
           <div className="space-y-3 lg:col-span-7">
-            {selectedCad && <ModelViewer3D asset={selectedCad} />}
+            {selectedCad && (
+              <Suspense
+                fallback={
+                  <div className="flex h-72 items-center justify-center rounded-2xl border border-[#DDE2DC] bg-[#F6F7F4] font-mono text-xs text-[#434E4A]">
+                    Loading 3D STL/3MF CAD Viewer...
+                  </div>
+                }
+              >
+                <ModelViewer3D asset={selectedCad} />
+              </Suspense>
+            )}
             <div className="rounded-xl border border-[#DDE2DC] bg-white p-4 text-xs space-y-1">
               <div className="font-semibold text-[#141A18]">Asset Audit Note</div>
               <p className="text-[#434E4A]">

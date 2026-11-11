@@ -1,10 +1,12 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import {
+  applyCors,
   checkRateLimit,
   createSupabaseDbAdapter,
   escapeHtml,
   getClientIp,
+  getOrCreateRequestId,
   parseJsonBody,
   recordAuditLog,
   requirePermission,
@@ -74,23 +76,28 @@ const patchLeadSchema = z.object({
 
 export function createInquiriesHandler(dbFactory: () => DbAdapter = createSupabaseDbAdapter) {
   return async function handler(req: ServerRequest, res: ServerResponse) {
+    const requestId = getOrCreateRequestId(req);
+    const cors = applyCors(req, res, requestId);
+    if (cors.handled) return;
+
     const db = dbFactory();
     if (!db.isConfigured()) {
       return res.status(503).json({
         error: 'Database unconfigured',
         message: 'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not configured on this server. No submission was simulated.',
+        requestId,
       });
     }
 
     if (req.method === 'POST') {
       const rate = checkRateLimit(`inq:${getClientIp(req)}`, 20, 60_000);
       if (!rate.allowed) {
-        return res.status(429).json({ error: `Rate limit exceeded. Retry in ${rate.retryAfterSec}s.` });
+        return res.status(429).json({ error: `Rate limit exceeded. Retry in ${rate.retryAfterSec}s.`, requestId });
       }
 
-      const bodyParse = parseJsonBody(req);
+      const bodyParse = parseJsonBody(req, 65_536);
       if (!bodyParse.ok) {
-        return res.status(400).json({ error: bodyParse.error });
+        return res.status(bodyParse.status).json({ error: bodyParse.error, requestId });
       }
       const body = bodyParse.data;
       if (typeof body.honeypot === 'string' && body.honeypot.trim().length > 0) {
@@ -268,12 +275,16 @@ export function createInquiriesHandler(dbFactory: () => DbAdapter = createSupaba
     }
 
     if (req.method === 'PATCH') {
+      const rate = checkRateLimit(`inq-patch:${getClientIp(req)}`, 60, 60_000);
+      if (!rate.allowed) {
+        return res.status(429).json({ error: `Rate limit exceeded. Retry in ${rate.retryAfterSec}s.`, requestId });
+      }
       const actor = await db.resolveActor(req);
       const auth = requirePermission(actor, 'edit_crm');
-      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+      if (!auth.ok) return res.status(auth.status).json({ error: auth.error, requestId });
 
-      const bodyParse = parseJsonBody(req);
-      if (!bodyParse.ok) return res.status(400).json({ error: bodyParse.error });
+      const bodyParse = parseJsonBody(req, 65_536);
+      if (!bodyParse.ok) return res.status(bodyParse.status).json({ error: bodyParse.error, requestId });
       const parsed = patchLeadSchema.safeParse(bodyParse.data);
       if (!parsed.success) {
         return res.status(400).json({ error: 'Invalid CRM lead update payload.' });

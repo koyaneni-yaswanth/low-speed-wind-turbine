@@ -1,6 +1,18 @@
-import { isServerDbConfigured, getServiceSupabase, type ServerRequest, type ServerResponse } from './_lib/db.ts';
+import {
+  applyCors,
+  getOrCreateRequestId,
+  getServiceSupabase,
+  isServerDbConfigured,
+  type ServerRequest,
+  type ServerResponse,
+} from './_lib/db.ts';
 
-export default async function handler(_req: ServerRequest, res: ServerResponse) {
+export default async function handler(req: ServerRequest, res: ServerResponse) {
+  const requestId = getOrCreateRequestId(req || { headers: {} });
+  if (req) {
+    const cors = applyCors(req, res, requestId);
+    if (cors.handled) return;
+  }
   const configured = isServerDbConfigured();
   let dbReachable = false;
   let dbError: string | null = null;

@@ -12,11 +12,16 @@ interface BoundaryState {
 
 export const WebGLFallbackCard: React.FC<{ title?: string; reason?: string }> = ({ title, reason }) => (
   <div className="relative overflow-hidden rounded-2xl border border-cyan-500/30 bg-[#0B1528] text-white">
-    <img
-      src="/repo-assets/media/prototype/mark-4-four-rotor-prototype.png"
-      alt="Pawan Shakti Mark-4 physical prototype fallback view"
-      className="h-72 w-full object-cover opacity-65 sm:h-96"
-    />
+    <picture>
+      <source srcSet="/optimized/mark-4-four-rotor-prototype.webp" type="image/webp" />
+      <img
+        src="/repo-assets/media/prototype/mark-4-four-rotor-prototype.png"
+        alt="Pawan Shakti Mark-4 physical prototype fallback view"
+        loading="lazy"
+        decoding="async"
+        className="h-72 w-full object-cover opacity-65 sm:h-96"
+      />
+    </picture>
     <div className="absolute inset-0 bg-gradient-to-t from-[#060D1A] via-[#060D1A]/60 to-transparent" />
     <div className="absolute inset-x-0 bottom-0 p-5 space-y-1">
       <div className="font-mono text-[11px] uppercase tracking-wider text-cyan-300">

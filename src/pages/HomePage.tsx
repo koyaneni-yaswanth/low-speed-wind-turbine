@@ -197,11 +197,19 @@ export const HomePage: React.FC = () => {
         <div className="grid gap-6 md:grid-cols-3">
           {PROTOTYPE_RECORDS.filter((p) => p.photoUrl).map((proto) => (
             <article key={proto.id} className="flex flex-col overflow-hidden rounded-2xl border border-[#DDE2DC] bg-white text-[#141A18]">
-              <img
-                src={proto.photoUrl!}
-                alt={proto.name}
-                className="aspect-[4/3] w-full object-cover bg-[#F6F7F4]"
-              />
+              <picture>
+                <source
+                  srcSet={`/optimized/${proto.photoUrl!.split('/').pop()?.replace(/\.(png|jpg|jpeg)$/i, '.webp')}`}
+                  type="image/webp"
+                />
+                <img
+                  src={proto.photoUrl!}
+                  alt={proto.name}
+                  loading="lazy"
+                  decoding="async"
+                  className="aspect-[4/3] w-full object-cover bg-[#F6F7F4]"
+                />
+              </picture>
               <div className="flex flex-1 flex-col justify-between p-4 space-y-3">
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between gap-2">

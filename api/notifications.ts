@@ -1,5 +1,9 @@
 import {
+  applyCors,
+  checkRateLimit,
   createSupabaseDbAdapter,
+  getClientIp,
+  getOrCreateRequestId,
   parseJsonBody,
   recordAuditLog,
   requirePermission,
@@ -58,11 +62,21 @@ export async function dispatchEmailNotification(params: {
 
 export function createNotificationsHandler(dbFactory: () => DbAdapter = createSupabaseDbAdapter) {
   return async function handler(req: ServerRequest, res: ServerResponse) {
+    const requestId = getOrCreateRequestId(req);
+    const cors = applyCors(req, res, requestId);
+    if (cors.handled) return;
+
+    const rate = checkRateLimit(`not:${getClientIp(req)}`, 60, 60_000);
+    if (!rate.allowed) {
+      return res.status(429).json({ error: `Rate limit exceeded. Retry in ${rate.retryAfterSec}s.`, requestId });
+    }
+
     const db = dbFactory();
     if (!db.isConfigured()) {
       return res.status(503).json({
         error: 'Database unconfigured',
         message: 'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set.',
+        requestId,
       });
     }
 
@@ -83,8 +97,8 @@ export function createNotificationsHandler(dbFactory: () => DbAdapter = createSu
       const writeAuth = requirePermission(actor, 'manage_cms_and_roles');
       if (!writeAuth.ok) return res.status(writeAuth.status).json({ error: writeAuth.error });
 
-      const bodyParse = parseJsonBody(req);
-      if (!bodyParse.ok) return res.status(400).json({ error: bodyParse.error });
+      const bodyParse = parseJsonBody(req, 65_536);
+      if (!bodyParse.ok) return res.status(bodyParse.status).json({ error: bodyParse.error, requestId });
       const body = bodyParse.data;
       if (!body.to || !body.subject || !body.htmlBody) {
         return res.status(400).json({ error: 'Fields to, subject, and htmlBody are required.' });

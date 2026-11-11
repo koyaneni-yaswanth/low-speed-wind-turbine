@@ -1,9 +1,12 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import {
+  applyCors,
   checkRateLimit,
   createSupabaseDbAdapter,
+  getClientIp,
   getHeaderValue,
+  getOrCreateRequestId,
   parseJsonBody,
   recordAuditLog,
   requirePermission,
@@ -49,11 +52,16 @@ const registerDeviceSchema = z.object({
 
 export function createTelemetryHandler(dbFactory: () => DbAdapter = createSupabaseDbAdapter) {
   return async function handler(req: ServerRequest, res: ServerResponse) {
+    const requestId = getOrCreateRequestId(req);
+    const cors = applyCors(req, res, requestId);
+    if (cors.handled) return;
+
     const db = dbFactory();
     if (!db.isConfigured()) {
       return res.status(503).json({
         error: 'Database unconfigured',
         message: 'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for live telemetry.',
+        requestId,
       });
     }
 
@@ -91,16 +99,16 @@ export function createTelemetryHandler(dbFactory: () => DbAdapter = createSupaba
 
     if (req.method === 'POST') {
       const deviceUid = getHeaderValue(req.headers, 'x-device-id');
-      const bodyParse = parseJsonBody(req);
+      const bodyParse = parseJsonBody(req, 32_768);
       if (!bodyParse.ok) {
         if (deviceUid) {
           await db.insertRow('device_errors', {
             device_uid: deviceUid,
-            error_type: 'malformed_json',
+            error_type: bodyParse.status === 413 ? 'oversized_payload' : 'malformed_json',
             detail: bodyParse.error,
           }).catch(() => {});
         }
-        return res.status(400).json({ error: bodyParse.error });
+        return res.status(bodyParse.status).json({ error: bodyParse.error, requestId });
       }
       const rawBodyStr = typeof req.body === 'string' ? req.body : JSON.stringify(bodyParse.data);
       const parsedJson = bodyParse.data;
@@ -222,9 +230,13 @@ export function createTelemetryHandler(dbFactory: () => DbAdapter = createSupaba
       }
 
       // Path B: Authenticated Engineer Actions (Device Registry, Test Runs & Lifecycle)
+      const adminRate = checkRateLimit(`tel-eng:${getClientIp(req)}`, 60, 60_000);
+      if (!adminRate.allowed) {
+        return res.status(429).json({ error: `Rate limit exceeded. Retry in ${adminRate.retryAfterSec}s.`, requestId });
+      }
       const actor = await db.resolveActor(req);
       const auth = requirePermission(actor, 'ingest_telemetry');
-      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+      if (!auth.ok) return res.status(auth.status).json({ error: auth.error, requestId });
 
       if (parsedJson?.action === 'register_device') {
         const reg = registerDeviceSchema.safeParse(parsedJson);

@@ -1,33 +1,27 @@
-# PAWAN SHAKTI — Security, Safety & Privacy Audit (`Phase 0`)
+# PAWAN SHAKTI — Security, Safety & Privacy Audit (`Phase 5`)
 
-## 1. Security Threat Model & Controls
+**Date:** 11 November 2026  
+**Verified Commit Baseline:** `2eaa4062b283c3f503e60ef4f4e8f455fd0a4ef7`  
+**Status Key:** `WORKING` | `PARTIAL` | `BLOCKED` | `NOT IMPLEMENTED` | `VERIFIED IN PRODUCTION`
 
-| Threat Vector | Mitigation Design | Verification Requirement |
-| :--- | :--- | :--- |
-| **Unauthorized Access to Admin / CRM / Financials** | Supabase Auth JWT validation on `/api/admin`, `/api/inquiries` (GET/PATCH), and `/api/telemetry` (private read/upload) + least-privilege PostgreSQL RLS | Automated tests verifying `401 Unauthorized` & `403 Forbidden` for anonymous/wrong-role tokens |
-| **Privilege Escalation Across Roles** | Explicit 6-role RBAC: `founder_super_admin`, `engineering_admin`, `crm_admin`, `team_member`, `external_reviewer`, `public_visitor`. `team_member` cannot view CRM PII or restricted financial models | RBAC permission matrix unit test covering every role x table operation |
-| **Exposed Secrets in Frontend Bundle** | Strict separation: ONLY `VITE_SUPABASE_URL` & `VITE_SUPABASE_ANON_KEY` allowed in `src/`; `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, and device secrets strictly server-side | Regex secret hygiene test scanning built `dist/` and `src/` |
-| **Telemetry Spoofing / Replay Attacks** | Device ingestion (`/api/telemetry`) requires `X-Device-Id`, `X-Device-Timestamp` (<=300s skew), unique `(device_id, timestamp, sequence_no)`, and `HMAC-SHA256` verification against server-side hashed device keys | Unit/API test checking tampered HMAC, stale timestamp, malformed units, and duplicate replay rejection |
-| **Public Form Spam & XSS/Injection** | Zod schema validation on client + server, honeypot hidden field, payload size caps, rate limiting headers/tracking, React safe rendering (no `dangerouslySetInnerHTML`) | Negative input & injection fuzz tests on `/api/inquiries` |
-| **Sensitive Legal / PII Document Exposure** | Asset sync script `sync-repo-assets.mjs` excludes `.docx` and any agreement files matching `*Pre - Incubation*`; Private Data Room items require `visibility = 'private'` + role check | Automated check verifying zero PII docs in `public/repo-assets/` |
-| **Fake Connected / Success States** | Missing cloud credentials yield honest HTTP `503` diagnostic states and explicit UI setup banners — never simulated `200 OK` form or email receipts | Integration tests running against unconfigured env verifying `503` & non-simulated notifications |
+---
+
+## 1. Security Controls & Verification Matrix
+
+| Security Control | Status | Verification Evidence & Technical Notes |
+|---|:---:|---|
+| **Client/Server Secret Isolation** | `WORKING` | `tests/api_and_security.test.mjs` verifies zero references to `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, or `DEVICE_HMAC_MASTER_SALT` in `src/`. Only `.env.example` tracked in Git (`0` `.env` secrets committed). |
+| **PostgreSQL Row-Level Security (36 Tables + 3 Buckets)** | `PARTIAL` | `001` (35 tables) + `002` (`device_errors` = 36 tables, `prevent_profile_role_escalation()`, `handle_new_auth_user()` -> `'public_visitor'`) + `003` (`storage.objects` role-scoped policies omitting Advisor `0025` broad public `SELECT`). Live Postgres JWT enforcement = `BLOCKED` pending DB creation. |
+| **Fail-Closed Auth & Unauthorized Route Gating** | `WORKING` (Local) / `BLOCKED` (Cloud) | `AdminPortalPage.tsx` uses `canAccessAdminRoute(authenticatedRole)`, blocks signed-in `'public_visitor'` users, supports `signUp`, `signInWithPassword`, `resetPasswordForEmail`, `PASSWORD_RECOVERY`, and expiry warnings. Server routes enforce `401`/`403` via Supabase JWT. |
+| **Telemetry HMAC-SHA256 & Anti-Control Boundary** | `WORKING` | `api/telemetry.ts` enforces `X-Device-Id`, `X-Device-Timestamp` (`+/-300s`), `timingSafeEqual` HMAC-SHA256, unique `(device_id, device_timestamp, sequence_no)` replay dedupe, `device_errors` logging, `180 req/min` rate limit, revoked device blocking (`403`), and zero actuation endpoints. |
+| **Safe Server Error Sanitization (`safeServerError`)** | `WORKING` | Verified in `api/_lib/db.ts` and `tests/api_and_security.test.mjs` (`500` returns `'Internal server database operation failed.'`, logging detail internally). |
+| **Public Asset & PII Protection** | `WORKING` | `scripts/sync-repo-assets.mjs` strips `.docx`, `z-lib`, and `*Pre - Incubation*` agreements; `/api/analytics` rejects PII keys (`400`); `/api/inquiries` uses honeypot, Zod schema, `escapeHtml()`, duplicate `409` guard, and `20 req/min` IP rate limit. |
+| **Dependency Vulnerability Hygiene** | `WORKING` | `npm audit` reports `0` vulnerabilities (`zod` pinned at `^4.6.7`). |
+| **Phase 6 API Hardening (CORS, Payload Limits, Rate Limits, Request IDs)** | `WORKING` (Local) | Added `applyCors()` (`403` blocked foreign origin, `OPTIONS` `204`), `parseJsonBody()` byte caps (`413` above `32 KB` telemetry / `64–128 KB`), rate limiting across `/api/inquiries`, `/api/telemetry`, `/api/admin`, `/api/analytics`, `/api/notifications`, and `X-Request-Id` tracing (`21/21` unit tests pass). |
 
 ---
 
 ## 2. Physical Hardware Safety Boundary (Non-Negotiable)
 
-- **Zero Remote Control Surfaces:** Neither the public website nor the authenticated engineering dashboard implements remote turbine start, brake release, yaw actuation, or pitch override commands.
-- **Monitoring Only:** `brake_state`, `fault_code`, `temperature`, and overspeed indicators are strictly **read-only telemetry observability fields** until an independently reviewed safety controller architecture is approved.
-- **No Unverified Safety Certifications:** Website never claims IEC 61400-2 certification, IP65 storm certification, or utility grid-tie compliance.
-
----
-
-## 3. Dated Security Hardening Verification Update (11 November 2026)
-
-| Security Control / Remediation | Classification | Concrete Verification |
-| :--- | :---: | :--- |
-| **Dependency Audit (`zod` upgraded to `>= 4.6.7`)** | **Implemented & Locally Tested** | Fixed `GHSA-mrhx-c7xc-m3w5` (`zod < 4.6.6` high memory exhaustion). `npm audit` reports **`0` vulnerabilities**. |
-| **Fail-Closed Default Profile Role (`public_visitor`)** | **Implemented & Locally Tested** | Fixed `api/_lib/db.ts` & `src/pages/AdminPortalPage.tsx` so missing `public.profiles` rows fail closed to `'public_visitor'` instead of `'team_member'`. |
-| **Full 36-Table RLS & Escalation Triggers (`002`)** | **Implemented & SQL-Checked** | Closed RLS policy gaps on all 36 tables; added `prevent_profile_role_escalation()` and `handle_new_auth_user()`. Live Postgres RLS = **NOT VERIFIED** pending Supabase setup. |
-| **Rate Limiting, Safe JSON Parsing & HTML Escaping** | **Implemented & Locally Tested** | Added `parseJsonBody()` (`400` on bad JSON), `escapeHtml()` in inquiry emails, duplicate active pilot rejection (`409`), sliding-window rate limits (`429`), zero-PII enforcement on `/api/analytics`, and telemetry error persistence (`device_errors`). |
-
+- Zero endpoints exist to engage/release mechanical brakes, start/stop rotors, actuate yaw, or alter generator load relays remotely.
+- `turbines.safety_status` remains `'monitoring_only_no_remote_actuation'` and `brake_state` is strictly an observational telemetry field.
