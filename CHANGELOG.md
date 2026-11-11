@@ -4,6 +4,16 @@ All notable technical updates, hardware revisions, and architectural milestones 
 
 ---
 
+## [Platform V1.2 — Cinematic 3D Wind Lab, Planetary Gearbox Kinematics & Interactive Visualization Suite] - 2026-11-11 (Branch `feature/pawan-shakti-platform`)
+
+### Added
+- Built modular 3D animation architecture across [`src/components/three/`](src/components/three/), [`src/components/animation/`](src/components/animation/), [`src/hooks/`](src/hooks/), and [`src/lib/animation/`](src/lib/animation/) with `AnimationBoundary` WebGL fallback, adaptive High/Balanced/Low-Power presets, `prefers-reduced-motion` support, Dark Aerospace / Light Lab theme switcher, and keyboard shortcuts (`Space`, `R`, `E`, `B`, `F`, `Escape`).
+- Implemented [`TurbineScene.tsx`](src/components/three/TurbineScene.tsx) featuring interactive wind-speed control (`2–11 m/s`), yaw wind-direction rotation, instanced conceptual airflow particles & streamlines (`Conceptual airflow visualization — not CFD simulation`), 10-part exploded assembly with guide lines, X-Ray nacelle, Blueprint wireframe mode, Presentation tour, and optional browser `MediaRecorder` WebM clip export.
+- Implemented [`PlanetaryGearScene.tsx`](src/components/three/PlanetaryGearScene.tsx) driven by the Willis planetary equation solver [`gearKinematics.ts`](src/lib/animation/gearKinematics.ts) ($N_s\omega_s + N_r\omega_r = (N_s+N_r)\omega_c$), plus [`GeneratorEnergyFlow.tsx`](src/components/three/GeneratorEnergyFlow.tsx), [`TwoPathComparisonScene.tsx`](src/components/three/TwoPathComparisonScene.tsx), [`EngineeringTimeline.tsx`](src/components/animation/EngineeringTimeline.tsx), and [`AnimatedTelemetryChart.tsx`](src/components/charts/AnimatedTelemetryChart.tsx).
+- Expanded automated tests to `19 / 19` passing Node tests (including `animation_kinematics.test.mjs`), `0` Oxlint errors/warnings, and full headless Chrome E2E + responsive screenshot verification (`1440x900`, `768x1024`, `375x812`).
+
+---
+
 ## [Platform V1.1 — Hardening, Full RLS, API Persistence & Edge-Case Verification] - 2026-11-11 (Branch `feature/pawan-shakti-platform`)
 
 ### Added & Fixed

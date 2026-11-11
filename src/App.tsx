@@ -1,5 +1,7 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { AnimationProvider } from './components/animation/AnimationProvider.tsx';
+import { useAnimationContext } from './components/animation/animationContext.ts';
 import { Navbar } from './components/layout/Navbar.tsx';
 import { Footer } from './components/layout/Footer.tsx';
 import { trackAnalyticsEvent } from './lib/analytics.ts';
@@ -23,30 +25,43 @@ const ScrollAndAnalytics: React.FC = () => {
   return null;
 };
 
+const AppShell: React.FC = () => {
+  const { theme } = useAnimationContext();
+  return (
+    <div
+      className={`flex min-h-screen flex-col transition-colors ${
+        theme === 'dark' ? 'bg-[#060D1A] text-slate-100' : 'bg-[#F6F7F4] text-[#141A18]'
+      }`}
+    >
+      <Navbar />
+      <main className="flex-1">
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/technology" element={<TechnologyPage />} />
+          <Route path="/products" element={<ProductsPage />} />
+          <Route path="/applications" element={<ApplicationsPage />} />
+          <Route path="/performance" element={<PerformancePage />} />
+          <Route path="/pilot" element={<PilotPage />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/resources" element={<ResourcesPage />} />
+          <Route path="/contact" element={<ContactPage />} />
+          <Route path="/admin" element={<AdminPortalPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </main>
+      <Footer />
+    </div>
+  );
+};
+
 export function App() {
   return (
-    <BrowserRouter>
-      <ScrollAndAnalytics />
-      <div className="flex min-h-screen flex-col bg-[#F6F7F4] text-[#141A18]">
-        <Navbar />
-        <main className="flex-1">
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/technology" element={<TechnologyPage />} />
-            <Route path="/products" element={<ProductsPage />} />
-            <Route path="/applications" element={<ApplicationsPage />} />
-            <Route path="/performance" element={<PerformancePage />} />
-            <Route path="/pilot" element={<PilotPage />} />
-            <Route path="/about" element={<AboutPage />} />
-            <Route path="/resources" element={<ResourcesPage />} />
-            <Route path="/contact" element={<ContactPage />} />
-            <Route path="/admin" element={<AdminPortalPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </main>
-        <Footer />
-      </div>
-    </BrowserRouter>
+    <AnimationProvider>
+      <BrowserRouter>
+        <ScrollAndAnalytics />
+        <AppShell />
+      </BrowserRouter>
+    </AnimationProvider>
   );
 }
 

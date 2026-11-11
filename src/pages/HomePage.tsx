@@ -1,9 +1,32 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, CheckCircle2, ChevronDown, ChevronUp, Cpu, FileText, Gauge, Layers, ShieldAlert, Wind } from 'lucide-react';
+import { ArrowRight, CheckCircle2, ChevronDown, ChevronUp, Cpu, FileText, Gauge, Layers, Wind } from 'lucide-react';
 import { APPLICATION_SEGMENTS, PROTOTYPE_RECORDS } from '../data/pawanShaktiData.ts';
 import { applyRouteSeo } from '../lib/seo.ts';
 import { EvidenceBadge } from '../components/common/EvidenceBadge.tsx';
+import { AnimationBoundary } from '../components/animation/AnimationBoundary.tsx';
+import { EngineeringTimeline } from '../components/animation/EngineeringTimeline.tsx';
+import { ScrollReveal } from '../components/animation/ScrollReveal.tsx';
+import { useScrollProgress } from '../hooks/useScrollProgress.ts';
+
+const TurbineScene = lazy(() =>
+  import('../components/three/TurbineScene.tsx').then((m) => ({ default: m.TurbineScene }))
+);
+const PlanetaryGearScene = lazy(() =>
+  import('../components/three/PlanetaryGearScene.tsx').then((m) => ({ default: m.PlanetaryGearScene }))
+);
+const GeneratorEnergyFlow = lazy(() =>
+  import('../components/three/GeneratorEnergyFlow.tsx').then((m) => ({ default: m.GeneratorEnergyFlow }))
+);
+const TwoPathComparisonScene = lazy(() =>
+  import('../components/three/TwoPathComparisonScene.tsx').then((m) => ({ default: m.TwoPathComparisonScene }))
+);
+
+const SceneLoadingPlaceholder: React.FC<{ label: string }> = ({ label }) => (
+  <div className="flex h-72 items-center justify-center rounded-2xl border border-cyan-500/20 bg-[#0B1528] text-xs font-mono text-cyan-300">
+    Loading {label}...
+  </div>
+);
 
 const FAQS = [
   {
@@ -20,187 +43,164 @@ const FAQS = [
   },
   {
     q: 'Is the 1 kW turbine validated or shipping today?',
-    a: 'No. Repository history documents 300 mm multi-rotor rigs targeted around a 100 W bench class and current ~1 m2 engineering assumptions in a 300–500 W coreless alternator design class. There is zero validated 1 kW unit today.',
+    a: 'No. Repository history documents 300 mm multi-rotor rigs targeted around a 100 W bench class and current ~1 m² engineering assumptions in a 300–500 W coreless alternator design class. There is zero validated 1 kW unit today.',
   },
 ];
 
 export const HomePage: React.FC = () => {
   const [openFaq, setOpenFaq] = useState<number | null>(0);
+  const scrollProgress = useScrollProgress();
 
   useEffect(() => {
     applyRouteSeo(
       {
-        title: 'PAWAN SHAKTI — Engineering Practical Wind Energy for Low-Speed Environments',
+        title: 'PAWAN SHAKTI — Powering the Future at the Speed of the Wind',
         description:
-          'TRL 4 low-speed wind energy R&D platform developing compact planetary and coaxial magnetic gear turbines for distributed off-grid and hybrid applications.',
+          'Interactive TRL 4 low-speed wind energy engineering laboratory: 3D wind turbine simulation, planetary gearbox kinematics, CAD explorer, calculators, and B2B pilot validation.',
       },
       '/'
     );
   }, []);
 
   return (
-    <div className="space-y-16 pb-16">
-      {/* Hero Section */}
-      <section className="border-b border-[#DDE2DC] bg-white">
-        <div className="mx-auto grid max-w-7xl items-center gap-10 px-4 py-12 sm:px-6 lg:grid-cols-12 lg:px-8 lg:py-16">
-          <div className="space-y-6 lg:col-span-7">
+    <div className="space-y-20 pb-20">
+      {/* SECTION 3: Cinematic Aerospace 3D Hero */}
+      <section className="relative overflow-hidden border-b border-cyan-500/20 bg-[#060D1A] text-white ps-aerospace-grid">
+        {/* Subtle initial light sweep */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-cyan-400/15 to-transparent ps-light-sweep"
+        />
+
+        <div className="mx-auto grid max-w-7xl items-center gap-8 px-4 py-10 sm:px-6 lg:grid-cols-12 lg:px-8 lg:py-14">
+          <div className="space-y-6 lg:col-span-5 min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-[#0B2B22]/20 bg-[#F6F7F4] px-3 py-1 font-mono text-xs font-semibold text-[#0B2B22]">
-                TRL 4 HARDWARE R&amp;D PROTOTYPE
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-400/35 bg-cyan-500/10 px-3 py-1 font-mono text-xs font-semibold text-cyan-200">
+                <Wind className="h-3.5 w-3.5" /> LOW-SPEED WIND ENERGY R&amp;D
               </span>
-              <EvidenceBadge tier="VERIFIED_MEASURED" />
+              <EvidenceBadge tier="PROTOTYPE_OBSERVATION" compact />
             </div>
 
-            <h1 className="font-display text-3xl font-extrabold tracking-tight text-[#141A18] sm:text-5xl leading-[1.1]">
-              Engineering practical wind energy for low-speed environments.
+            <h1 className="font-display text-3xl font-extrabold tracking-tight text-white sm:text-5xl leading-[1.08]">
+              Powering the Future at the Speed of the Wind.
             </h1>
 
-            <p className="max-w-2xl text-base leading-relaxed text-[#434E4A] sm:text-lg">
-              Small-scale wind technology designed to make more of the wind that conventional small systems may not
-              effectively use — advancing from laboratory planetary prototypes toward validated distributed and solar-hybrid pilots.
+            <p className="text-base leading-relaxed text-slate-300">
+              Engineering low-speed wind energy systems designed to explore decentralized power generation for rural,
+              off-grid, and remote applications.
             </p>
 
             <div className="flex flex-wrap gap-3 pt-1">
               <Link
-                to="/pilot"
-                className="inline-flex items-center gap-2 rounded-xl bg-[#0B2B22] px-5 py-3 text-sm font-semibold text-white shadow-xs transition hover:bg-[#144537]"
-              >
-                Discuss a Pilot <ArrowRight className="h-4 w-4" />
-              </Link>
-              <Link
                 to="/technology"
-                className="inline-flex items-center gap-2 rounded-xl border border-[#DDE2DC] bg-white px-5 py-3 text-sm font-semibold text-[#141A18] transition hover:bg-[#F6F7F4]"
+                className="inline-flex items-center gap-2 rounded-xl bg-cyan-400 px-5 py-3 text-sm font-bold text-[#060D1A] shadow-lg shadow-cyan-500/20 transition hover:bg-cyan-300"
               >
-                Explore the Technology
+                Explore the Technology <ArrowRight className="h-4 w-4" />
               </Link>
+              <a
+                href="#engineering-lab"
+                className="inline-flex items-center gap-2 rounded-xl border border-cyan-400/40 bg-[#0B1528]/90 px-5 py-3 text-sm font-semibold text-white transition hover:border-cyan-300 hover:bg-[#101A2C]"
+              >
+                View Engineering Lab
+              </a>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 pt-3 sm:grid-cols-4 border-t border-[#DDE2DC]">
+            {/* Required Technical Status Panel */}
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 rounded-2xl border border-cyan-500/25 bg-[#0B1528]/85 p-4 backdrop-blur-md text-xs">
               <div>
-                <div className="font-mono text-xs text-[#434E4A]">Development Stage</div>
-                <div className="font-display text-sm font-bold text-[#141A18]">TRL 4 Prototype</div>
+                <div className="font-mono text-[10px] uppercase text-cyan-300">Technology</div>
+                <div className="mt-0.5 font-semibold text-white">Low-speed wind energy</div>
               </div>
               <div>
-                <div className="font-mono text-xs text-[#434E4A]">Target Swept Area</div>
-                <div className="font-display text-sm font-bold text-[#141A18]">~1.0 m² (Est.)</div>
+                <div className="font-mono text-[10px] uppercase text-cyan-300">Current Development Stage</div>
+                <div className="mt-0.5 font-semibold text-emerald-300">TRL 4 (Bench Prototype)</div>
               </div>
               <div>
-                <div className="font-mono text-xs text-[#434E4A]">Hardware Line</div>
-                <div className="font-display text-sm font-bold text-[#141A18]">Mark-3 / 4 / 5</div>
+                <div className="font-mono text-[10px] uppercase text-cyan-300">Research Focus</div>
+                <div className="mt-0.5 font-semibold text-slate-200">Mechanical efficiency &amp; low-speed generation</div>
               </div>
               <div>
-                <div className="font-mono text-xs text-[#434E4A]">Patent Application</div>
-                <div className="font-display text-sm font-bold text-[#141A18]">Published 2025</div>
+                <div className="font-mono text-[10px] uppercase text-cyan-300">Next Milestone</div>
+                <div className="mt-0.5 font-semibold text-amber-200">Evidence-backed field validation</div>
               </div>
             </div>
           </div>
 
-          <div className="lg:col-span-5">
-            <div className="overflow-hidden rounded-2xl border border-[#DDE2DC] bg-[#F6F7F4]">
-              <img
-                src="/repo-assets/media/prototype/mark-4-four-rotor-prototype.png"
-                alt="Pawan Shakti Mark-4 physical four-rotor planetary prototype rig"
-                className="aspect-[4/3] w-full object-cover"
-              />
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#DDE2DC] bg-white px-4 py-3 text-xs">
-                <span className="font-medium text-[#141A18]">Mark-4 Physical Prototype Rig (VNIT Nagpur Lab)</span>
-                <EvidenceBadge tier="PROTOTYPE_OBSERVATION" compact />
-              </div>
-            </div>
+          <div className="lg:col-span-7 min-w-0">
+            <AnimationBoundary fallbackTitle="Pawan Shakti Hero 3D Wind Turbine">
+              <Suspense fallback={<SceneLoadingPlaceholder label="3D Hero Wind Turbine" />}>
+                <TurbineScene mode="hero" scrollProgress={scrollProgress} />
+              </Suspense>
+            </AnimationBoundary>
           </div>
         </div>
       </section>
 
-      {/* Problem Explanation & Current Status Boundary */}
-      <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="grid gap-6 lg:grid-cols-12">
-          <div className="rounded-2xl border border-[#DDE2DC] bg-white p-6 lg:col-span-7 space-y-4">
-            <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-[#0B2B22]">
-              <Wind className="h-4 w-4" /> Why Low-Speed Wind Fails Conventionally
+      {/* SECTION 4–8 & 10–12: Scroll Narrative, Planetary Gearbox, Generator Energy Flow & Shootout */}
+      <section id="engineering-lab" className="mx-auto max-w-7xl space-y-16 px-4 sm:px-6 lg:px-8">
+        <ScrollReveal>
+          <div className="space-y-2 border-b border-cyan-500/20 pb-4">
+            <div className="font-mono text-xs uppercase tracking-wider text-cyan-400">
+              Interactive Engineering Laboratories (Scenes 01–07)
             </div>
-            <h2 className="font-display text-2xl font-bold text-[#141A18]">
-              Cubic Wind Power Scaling, Cogging Stiction &amp; Diurnal Solar Gaps
+            <h2 className="font-display text-2xl font-bold sm:text-3xl">
+              From Low-Speed Wind Inflow to Verified Electromechanical Validation
             </h2>
-            <p className="text-sm leading-relaxed text-[#434E4A]">
-              Kinetic stream power scales with the cube of wind velocity (<code className="font-mono">P = ½ρAV³</code>).
-              Drop wind speed from coastal 10 m/s to an inland 3 m/s breeze and power density falls by <strong>97.3%</strong>.
-              At sub-critical chord Reynolds numbers (<code className="font-mono">Re &lt; 100,000</code>), thick conventional blades lose
-              lift while generator cogging torque and gear stiction keep rotors stalled below ~5 m/s.
+            <p className="max-w-3xl text-sm text-slate-400">
+              Every visual simulator explicitly separates interactive physics models (`Simulated` / `Estimated`) from
+              calibrated field measurements (`Measured` — currently awaiting 1 Hz closed-loop dyno runs).
             </p>
-            <div className="grid gap-3 sm:grid-cols-3 pt-2 text-xs">
-              <div className="rounded-xl border border-[#DDE2DC] bg-[#F6F7F4] p-3">
-                <div className="font-semibold text-[#141A18]">Low-Re Aerodynamics</div>
-                <p className="mt-1 text-[#434E4A]">High-camber Selig S1223 airfoils &amp; multi-blade solidity studied for static breakaway torque.</p>
-              </div>
-              <div className="rounded-xl border border-[#DDE2DC] bg-[#F6F7F4] p-3">
-                <div className="font-semibold text-[#141A18]">Step-Up Shootout</div>
-                <p className="mt-1 text-[#434E4A]">Evaluating coaxial magnetic gearing (Option A) vs planetary gearboxes (Option B) head-to-head.</p>
-              </div>
-              <div className="rounded-xl border border-[#DDE2DC] bg-[#F6F7F4] p-3">
-                <div className="font-semibold text-[#141A18]">Complementary Hybrid Role</div>
-                <p className="mt-1 text-[#434E4A]">Targeted at night/monsoon battery replenishment alongside solar PV—never claimed as 24/7 output.</p>
-              </div>
-            </div>
           </div>
+        </ScrollReveal>
 
-          <div className="rounded-2xl border border-[#DDE2DC] bg-white p-6 lg:col-span-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-display text-lg font-bold text-[#141A18]">Prototype Evidence vs Future Targets</h3>
-              <EvidenceBadge tier="ENGINEERING_ESTIMATE" compact />
-            </div>
-            <div className="space-y-3 text-xs">
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3">
-                <div className="font-semibold text-emerald-950 flex items-center gap-1.5">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" /> Current Prototype Reality (TRL 4)
-                </div>
-                <p className="mt-1 text-emerald-900/90">
-                  4-setup &amp; 3-setup planetary gear arrangements built with blade support structures, rear fan gear &amp; wood/aluminum test frames. Calibrated 1 Hz closed-loop power curves are actively being built.
-                </p>
-              </div>
-              <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
-                <div className="font-semibold text-amber-950 flex items-center gap-1.5">
-                  <ShieldAlert className="h-3.5 w-3.5 text-amber-700" /> Working 1 m² Iteration Inputs (Unvalidated)
-                </div>
-                <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-amber-900">
-                  <li>• Target Swept Area: ~1.0 m² (r ≈ 0.564 m)</li>
-                  <li>• Wind Regime: 2–8 m/s (Cut-in ≤ 2.2 m/s target)</li>
-                  <li>• Preliminary Estimates: 20–25W @ 5 m/s | 95–110W @ 8 m/s | 250–300W @ 11 m/s</li>
-                  <li>• Coreless PMA Concept: 300–500 W class @ 300–600 RPM</li>
-                </ul>
-              </div>
-              <Link
-                to="/performance"
-                className="inline-flex items-center gap-1 font-semibold text-[#0B2B22] hover:underline"
-              >
-                Open Interactive Calculators &amp; Telemetry Hub <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </div>
-          </div>
-        </div>
+        <EngineeringTimeline />
+
+        <ScrollReveal>
+          <AnimationBoundary fallbackTitle="Planetary Gearbox Kinematics Visualizer">
+            <Suspense fallback={<SceneLoadingPlaceholder label="Planetary Gearbox 3D Assembly" />}>
+              <PlanetaryGearScene />
+            </Suspense>
+          </AnimationBoundary>
+        </ScrollReveal>
+
+        <ScrollReveal>
+          <AnimationBoundary fallbackTitle="Generator Energy Conversion Simulator">
+            <Suspense fallback={<SceneLoadingPlaceholder label="Generator Energy Flow" />}>
+              <GeneratorEnergyFlow />
+            </Suspense>
+          </AnimationBoundary>
+        </ScrollReveal>
+
+        <ScrollReveal>
+          <AnimationBoundary fallbackTitle="Option A vs Option B Architecture Comparison">
+            <Suspense fallback={<SceneLoadingPlaceholder label="Option A vs Option B Comparison" />}>
+              <TwoPathComparisonScene />
+            </Suspense>
+          </AnimationBoundary>
+        </ScrollReveal>
       </section>
 
-      {/* Authentic Prototype Evolution Gallery */}
+      {/* Authentic Hardware Prototype Photography Gallery (Original Assets Preserved) */}
       <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h2 className="font-display text-2xl font-bold text-[#141A18]">Hardware Prototype Evolution</h2>
-            <p className="text-sm text-[#434E4A]">
+            <h2 className="font-display text-2xl font-bold">Hardware Prototype Evolution</h2>
+            <p className="text-sm text-slate-400">
               Every image shows actual physical Pawan Shakti bench hardware (zero stock turbine photos).
             </p>
           </div>
-          <Link to="/products" className="text-xs font-semibold text-[#0B2B22] hover:underline">
+          <Link to="/products" className="text-xs font-semibold text-cyan-400 hover:underline">
             Compare Option A &amp; Option B Architectures →
           </Link>
         </div>
 
         <div className="grid gap-6 md:grid-cols-3">
           {PROTOTYPE_RECORDS.filter((p) => p.photoUrl).map((proto) => (
-            <article key={proto.id} className="flex flex-col overflow-hidden rounded-2xl border border-[#DDE2DC] bg-white">
+            <article key={proto.id} className="flex flex-col overflow-hidden rounded-2xl border border-[#DDE2DC] bg-white text-[#141A18]">
               <img
                 src={proto.photoUrl!}
                 alt={proto.name}
                 className="aspect-[4/3] w-full object-cover bg-[#F6F7F4]"
-                loading="lazy"
               />
               <div className="flex flex-1 flex-col justify-between p-4 space-y-3">
                 <div className="space-y-1.5">
@@ -223,22 +223,22 @@ export const HomePage: React.FC = () => {
       {/* How It Works & Quick Capability Links */}
       <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Link to="/technology" className="rounded-2xl border border-[#DDE2DC] bg-white p-5 transition hover:border-[#0B2B22]">
+          <Link to="/technology" className="rounded-2xl border border-[#DDE2DC] bg-white p-5 text-[#141A18] transition hover:border-cyan-400">
             <Layers className="h-5 w-5 text-[#0B2B22]" />
             <h3 className="mt-3 font-display text-base font-bold text-[#141A18]">CAD Vault &amp; S1223</h3>
             <p className="mt-1 text-xs text-[#434E4A]">Inspect interactive 3D STL/3MF meshes, Fusion assemblies &amp; formal 2D drawings.</p>
           </Link>
-          <Link to="/performance" className="rounded-2xl border border-[#DDE2DC] bg-white p-5 transition hover:border-[#0B2B22]">
+          <Link to="/performance" className="rounded-2xl border border-[#DDE2DC] bg-white p-5 text-[#141A18] transition hover:border-cyan-400">
             <Gauge className="h-5 w-5 text-[#0B2B22]" />
             <h3 className="mt-3 font-display text-base font-bold text-[#141A18]">Calculators &amp; DAQ</h3>
             <p className="mt-1 text-xs text-[#434E4A]">Betz-bounded Wind, ROI, and Solar-Wind Hybrid calculators + ESP32 telemetry.</p>
           </Link>
-          <Link to="/applications" className="rounded-2xl border border-[#DDE2DC] bg-white p-5 transition hover:border-[#0B2B22]">
+          <Link to="/applications" className="rounded-2xl border border-[#DDE2DC] bg-white p-5 text-[#141A18] transition hover:border-cyan-400">
             <Cpu className="h-5 w-5 text-[#0B2B22]" />
             <h3 className="mt-3 font-display text-base font-bold text-[#141A18]">7 Target Applications</h3>
             <p className="mt-1 text-xs text-[#434E4A]">Telecom, campuses, industrial roofs, remote IoT &amp; agriculture pilot hypotheses.</p>
           </Link>
-          <Link to="/resources" className="rounded-2xl border border-[#DDE2DC] bg-white p-5 transition hover:border-[#0B2B22]">
+          <Link to="/resources" className="rounded-2xl border border-[#DDE2DC] bg-white p-5 text-[#141A18] transition hover:border-cyan-400">
             <FileText className="h-5 w-5 text-[#0B2B22]" />
             <h3 className="mt-3 font-display text-base font-bold text-[#141A18]">IP &amp; Evidence Library</h3>
             <p className="mt-1 text-xs text-[#434E4A]">Published 2025 Indian Patent record, VNIT V3F summary &amp; test protocols.</p>
@@ -248,7 +248,7 @@ export const HomePage: React.FC = () => {
 
       {/* Applications & Team Preview */}
       <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 grid gap-6 lg:grid-cols-12">
-        <div className="rounded-2xl border border-[#DDE2DC] bg-white p-6 lg:col-span-7 space-y-4">
+        <div className="rounded-2xl border border-[#DDE2DC] bg-white p-6 text-[#141A18] lg:col-span-7 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="font-display text-xl font-bold text-[#141A18]">Target Distributed Applications (Pre-Commercial)</h2>
             <Link to="/applications" className="text-xs font-semibold text-[#0B2B22] hover:underline">View all 7 →</Link>
@@ -264,11 +264,14 @@ export const HomePage: React.FC = () => {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-[#DDE2DC] bg-white p-6 lg:col-span-5 space-y-4">
+        <div className="rounded-2xl border border-[#DDE2DC] bg-white p-6 text-[#141A18] lg:col-span-5 space-y-4">
           <h2 className="font-display text-xl font-bold text-[#141A18]">Leadership, Mentorship &amp; IP</h2>
           <div className="space-y-3 text-xs text-[#434E4A]">
-            <div>
-              <span className="font-semibold text-[#141A18]">Founder &amp; Lead:</span> Koyaneni Yaswanth (B.Tech Metallurgical &amp; Materials Engineering, VNIT Nagpur)
+            <div className="flex items-start gap-2">
+              <CheckCircle2 className="h-4 w-4 text-emerald-700 shrink-0 mt-0.5" />
+              <span>
+                <span className="font-semibold text-[#141A18]">Founder &amp; Lead:</span> Koyaneni Yaswanth (B.Tech Metallurgical &amp; Materials Engineering, VNIT Nagpur)
+              </span>
             </div>
             <div>
               <span className="font-semibold text-[#141A18]">Academic Mentor:</span> Dr. Jawahar Bhukya (Asst. Professor, EEE Dept., VNIT Nagpur)
@@ -293,8 +296,8 @@ export const HomePage: React.FC = () => {
 
       {/* FAQ */}
       <section className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 space-y-4">
-        <h2 className="font-display text-2xl font-bold text-[#141A18]">Technical &amp; Verification FAQs</h2>
-        <div className="divide-y divide-[#DDE2DC] rounded-2xl border border-[#DDE2DC] bg-white">
+        <h2 className="font-display text-2xl font-bold">Technical &amp; Verification FAQs</h2>
+        <div className="divide-y divide-[#DDE2DC] rounded-2xl border border-[#DDE2DC] bg-white text-[#141A18]">
           {FAQS.map((item, idx) => (
             <div key={item.q}>
               <button

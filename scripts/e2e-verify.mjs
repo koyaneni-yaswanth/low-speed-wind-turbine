@@ -55,6 +55,9 @@ async function runE2E() {
       const routes = ['/', '/technology', '/products', '/applications', '/performance', '/pilot', '/about', '/resources', '/contact', '/admin'];
       for (const route of routes) {
         await page.goto(`${PREVIEW_URL}${route}`, { waitUntil: 'networkidle' });
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        await wait(250);
+        await page.evaluate(() => window.scrollTo(0, 0));
         const bodyText = await page.locator('main').innerText();
         assert.ok(bodyText.trim().length > 80, `Route ${route} rendered empty content`);
 
@@ -67,16 +70,49 @@ async function runE2E() {
         assert.ok(overflowDesktop <= 2, `Horizontal overflow on desktop ${route}: ${overflowDesktop}px`);
       }
 
-      // Desktop Home Screenshot
+      // 1b. Verify Interactive 3D Hero Turbine Lab, Exploded View, Wind Speed, Gearbox & Energy Flow on '/'
       await page.goto(`${PREVIEW_URL}/`, { waitUntil: 'networkidle' });
+      await page.getByText('Powering the Future at the Speed of the Wind.').waitFor();
+      await page.getByText('Conceptual airflow visualization — not CFD simulation').waitFor();
+      await page.getByText(/Simulation Mode — No live hardware data connected/).first().waitFor();
+      await page.getByRole('button', { name: '8 m/s' }).first().click();
+      await page.getByRole('button', { name: 'Explode All' }).click();
+      await page.getByRole('button', { name: 'gearbox' }).click();
+      await page.getByText('Step-Up Gearbox (Option A/B)').waitFor();
+      await page.getByRole('button', { name: 'Blueprint' }).click();
+      await page.getByRole('button', { name: 'Pause simulation' }).click();
+      await page.getByRole('button', { name: 'Reset turbine simulation' }).click();
+      await page.getByText('Planetary Gearbox Kinematics Lab (Willis Equation Solver)').waitFor();
+      await page.getByText(/Research options remain under evaluation until validated test evidence/).waitFor();
+
+      // Step-scroll through '/' so every ScrollReveal and lazy 3D scene triggers before full-page screenshot
+      for (const frac of [0.25, 0.5, 0.75, 1.0]) {
+        await page.evaluate((f) => window.scrollTo(0, document.body.scrollHeight * f), frac);
+        await wait(220);
+      }
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await wait(250);
+
+      // Desktop Home Screenshot
       const desktopShot = path.join(SCREENSHOT_DIR, 'desktop-1440-home.png');
       await page.screenshot({ path: desktopShot, fullPage: true });
       assert.ok(fs.statSync(desktopShot).size > 10000);
 
-      // 2. Verify Interactive Performance CSV Audit & Calculator Suite (+ Negative Validation)
+      // Verify Reduced Motion & Theme Toggle
+      await page.getByRole('button', { name: 'Toggle reduced motion' }).click();
+      await page.getByRole('button', { name: 'Switch color theme' }).click();
+      const lightShot = path.join(SCREENSHOT_DIR, 'desktop-1440-light-theme.png');
+      await page.screenshot({ path: lightShot });
+      assert.ok(fs.statSync(lightShot).size > 10000);
+      await page.getByRole('button', { name: 'Switch color theme' }).click();
+      await page.getByRole('button', { name: 'Toggle reduced motion' }).click();
+
+      // 2. Verify Interactive Performance CSV Audit, Animated Telemetry Graph & Calculator Suite
       await page.goto(`${PREVIEW_URL}/performance`, { waitUntil: 'networkidle' });
       await page.getByRole('button', { name: 'Inspect Repo Sample CSV' }).click();
       await page.getByText(/Betz Anomalies Flagged:/).waitFor({ timeout: 5000 });
+      await page.getByText('Illustrative sample dataset — not experimental results').waitFor();
+      await page.locator('#ps-telemetry-svg-chart').waitFor();
       await page.getByRole('tab', { name: 'ROI & Payback' }).click();
       await page.getByText('Total Installed CapEx (Est.)').waitFor();
       await page.getByRole('tab', { name: 'Solar-Wind Hybrid' }).click();

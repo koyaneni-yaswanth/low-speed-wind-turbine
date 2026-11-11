@@ -1,10 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { ASSET_MANIFEST } from '../data/pawanShaktiData.ts';
 import type { CadAssetItem } from '../types/index.ts';
 import { applyRouteSeo } from '../lib/seo.ts';
 import { AirfoilPlot } from '../components/charts/AirfoilPlot.tsx';
 import { ModelViewer3D } from '../components/cad/ModelViewer3D.tsx';
 import { EvidenceBadge } from '../components/common/EvidenceBadge.tsx';
+import { AnimationBoundary } from '../components/animation/AnimationBoundary.tsx';
+
+const TurbineScene = lazy(() =>
+  import('../components/three/TurbineScene.tsx').then((m) => ({ default: m.TurbineScene }))
+);
+const PlanetaryGearScene = lazy(() =>
+  import('../components/three/PlanetaryGearScene.tsx').then((m) => ({ default: m.PlanetaryGearScene }))
+);
 
 export const TechnologyPage: React.FC = () => {
   const cadAssets = ASSET_MANIFEST.cadAssets as CadAssetItem[];
@@ -132,6 +140,41 @@ export const TechnologyPage: React.FC = () => {
             </div>
           </div>
         </div>
+      </section>
+
+      {/* Interactive Exploded Assembly & Planetary Kinematics Labs */}
+      <section className="space-y-6">
+        <div className="space-y-1">
+          <h2 className="font-display text-2xl font-bold text-[#141A18]">
+            Interactive Wind Energy &amp; Planetary Kinematics Laboratory
+          </h2>
+          <p className="text-xs text-[#434E4A]">
+            Inspect all 10 exploded components, toggle X-Ray / Blueprint views, test wind-speed response, and verify Willis
+            gearbox kinematics interactively. Conceptual visualizations do not replace calibrated CAD tolerances or test runs.
+          </p>
+        </div>
+        <AnimationBoundary fallbackTitle="3D Exploded Wind Turbine Lab">
+          <Suspense
+            fallback={
+              <div className="flex h-64 items-center justify-center rounded-2xl border border-cyan-500/20 bg-[#0B1528] font-mono text-xs text-cyan-300">
+                Loading Interactive 3D Lab...
+              </div>
+            }
+          >
+            <TurbineScene mode="lab" />
+          </Suspense>
+        </AnimationBoundary>
+        <AnimationBoundary fallbackTitle="Planetary Gearbox Kinematics Lab">
+          <Suspense
+            fallback={
+              <div className="flex h-64 items-center justify-center rounded-2xl border border-cyan-500/20 bg-[#0B1528] font-mono text-xs text-cyan-300">
+                Loading Planetary Gearbox Kinematics...
+              </div>
+            }
+          >
+            <PlanetaryGearScene />
+          </Suspense>
+        </AnimationBoundary>
       </section>
 
       {/* Interactive 3D CAD Explorer */}

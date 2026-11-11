@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
 :root {
+  --ps-navy: #060D1A;
+  --ps-navy-surface: #0B1528;
+  --ps-charcoal: #101A2C;
+  --ps-cyan: #22D3EE;
   --ps-forest: #0B2B22;
   --ps-forest-mid: #144537;
   --ps-graphite: #141A18;
@@ -8,10 +12,58 @@
   --ps-canvas: #F6F7F4;
   --ps-surface: #FFFFFF;
   --ps-border: #DDE2DC;
-  --ps-emerald: #047857;
+  --ps-emerald: #10B981;
   --ps-amber: #B45309;
   --ps-copper: #9A3412;
   --ps-blue: #1D4ED8;
+}
+
+.ps-aerospace-grid {
+  background-image:
+    linear-gradient(to right, rgba(34, 211, 238, 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(34, 211, 238, 0.06) 1px, transparent 1px);
+  background-size: 36px 36px;
+}
+
+@keyframes psLightSweep {
+  0% { transform: translateX(-110%) skewX(-18deg); opacity: 0; }
+  35% { opacity: 0.35; }
+  100% { transform: translateX(220%) skewX(-18deg); opacity: 0; }
+}
+
+.ps-light-sweep {
+  animation: psLightSweep 3.4s ease-out 1;
+}
+
+/* Preserve readable engineering contrast across Dark Aerospace shell + light technical cards */
+[data-ps-theme="dark"] main > div > header h1,
+[data-ps-theme="dark"] main > div > header h2,
+[data-ps-theme="dark"] main > div > section:not(.bg-white) > h2,
+[data-ps-theme="dark"] main > div > section:not(.bg-white) > div:not(.bg-white) > h2,
+[data-ps-theme="dark"] main > div > section:not(.bg-white) > div:not(.bg-white) > div:not(.bg-white) > h2 {
+  color: #F8FAFC;
+}
+
+[data-ps-theme="dark"] main > div > header > p,
+[data-ps-theme="dark"] main > div > section:not(.bg-white) > div:not(.bg-white) > p,
+[data-ps-theme="dark"] main > div > section:not(.bg-white) > div:not(.bg-white) > div:not(.bg-white) > p {
+  color: #CBD5E1;
+}
+
+[data-ps-theme="dark"] main > div > header {
+  border-color: rgba(34, 211, 238, 0.22);
+}
+
+[data-ps-theme="dark"] .bg-white,
+[data-ps-theme="dark"] .bg-white input,
+[data-ps-theme="dark"] .bg-white select,
+[data-ps-theme="dark"] .bg-white textarea {
+  color: #141A18;
+}
+
+[data-ps-theme="dark"] .bg-white input::placeholder,
+[data-ps-theme="dark"] .bg-white textarea::placeholder {
+  color: #64748B;
 }
 
 @layer base {

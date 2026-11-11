@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Download, Radio, Upload } from 'lucide-react';
 import { computePowerCurveBins, exportTelemetryToCsv, parseEsp32Csv } from '../lib/csvTelemetry.ts';
 import type { TelemetryReading } from '../types/index.ts';
@@ -6,6 +6,11 @@ import { ASSET_MANIFEST } from '../data/pawanShaktiData.ts';
 import { applyRouteSeo } from '../lib/seo.ts';
 import { EvidenceBadge } from '../components/common/EvidenceBadge.tsx';
 import { CalculatorSuite } from '../components/common/CalculatorSuite.tsx';
+import { AnimatedTelemetryChart } from '../components/charts/AnimatedTelemetryChart.tsx';
+
+const GeneratorEnergyFlow = lazy(() =>
+  import('../components/three/GeneratorEnergyFlow.tsx').then((m) => ({ default: m.GeneratorEnergyFlow }))
+);
 
 export const PerformancePage: React.FC = () => {
   const [readings, setReadings] = useState<TelemetryReading[]>([]);
@@ -185,6 +190,11 @@ export const PerformancePage: React.FC = () => {
               </span>
             </div>
 
+            <AnimatedTelemetryChart
+              readings={visibleReadings}
+              isSampleTemplate={dataLabel.includes('Archived Template')}
+            />
+
             {bins.length > 0 && (
               <div>
                 <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-[#434E4A]">
@@ -253,6 +263,19 @@ export const PerformancePage: React.FC = () => {
             </div>
           </div>
         )}
+      </section>
+
+      {/* Interactive Energy Conversion Simulator */}
+      <section>
+        <Suspense
+          fallback={
+            <div className="flex h-48 items-center justify-center rounded-2xl border border-cyan-500/20 bg-[#0B1528] font-mono text-xs text-cyan-300">
+              Loading Energy Flow Simulator...
+            </div>
+          }
+        >
+          <GeneratorEnergyFlow />
+        </Suspense>
       </section>
 
       {/* Interactive Calculator Suite */}

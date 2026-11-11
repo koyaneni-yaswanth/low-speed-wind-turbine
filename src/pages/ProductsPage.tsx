@@ -1,8 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { OPTION_COMPARISON_CRITERIA, PROTOTYPE_RECORDS } from '../data/pawanShaktiData.ts';
 import { applyRouteSeo } from '../lib/seo.ts';
 import { EvidenceBadge } from '../components/common/EvidenceBadge.tsx';
+import { AnimationBoundary } from '../components/animation/AnimationBoundary.tsx';
+
+const TwoPathComparisonScene = lazy(() =>
+  import('../components/three/TwoPathComparisonScene.tsx').then((m) => ({ default: m.TwoPathComparisonScene }))
+);
 
 export const ProductsPage: React.FC = () => {
   const [filterCriterion, setFilterCriterion] = useState('');
@@ -113,6 +118,19 @@ export const ProductsPage: React.FC = () => {
           </table>
         </div>
       </section>
+
+      {/* Interactive Side-by-Side 3D Research Track Visualizer */}
+      <AnimationBoundary fallbackTitle="Two-Path Drivetrain 3D Comparison">
+        <Suspense
+          fallback={
+            <div className="flex h-64 items-center justify-center rounded-2xl border border-cyan-500/20 bg-[#0B1528] font-mono text-xs text-cyan-300">
+              Loading Two-Path 3D Drivetrain Comparison...
+            </div>
+          }
+        >
+          <TwoPathComparisonScene />
+        </Suspense>
+      </AnimationBoundary>
 
       {/* Option A vs Option B 16-Criterion Comparison Workspace */}
       <section className="space-y-4">
