@@ -635,5 +635,10 @@ test('Phase 6 & Phase 12 Hardening: rejects oversized packets (413), blocks unau
   assert.equal(hRes.statusCode, 503);
   assert.equal(hRes.payload.applicationAvailable, true);
   assert.equal(hRes.payload.configStatus, 'configuration_incomplete');
+
+  const sql4 = fs.readFileSync(path.join(process.cwd(), 'supabase/migrations/004_schema_advisor_hardening.sql'), 'utf-8');
+  assert.ok(sql4.includes('set search_path = public'));
+  assert.ok(sql4.includes('fk_pilot_projects_turbine'));
+  assert.ok(sql4.includes('idx_leads_org'));
 });
 
