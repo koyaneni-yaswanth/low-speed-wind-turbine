@@ -9,6 +9,8 @@ import type {
   TurbineDevice,
 } from '../../types/index.ts';
 import { computePowerCurveBins, exportTelemetryToCsv, parseEsp32Csv } from '../../lib/csvTelemetry.ts';
+import { getSupabaseClient } from '../../lib/supabase.ts';
+import { filterTelemetryByRange, mapDbTelemetryRow, mapDbTurbineRow } from '../../lib/telemetryMappers.ts';
 import { EvidenceBadge } from '../common/EvidenceBadge.tsx';
 
 export const EngineeringWorkbenchTab: React.FC<{ canEdit: boolean; accessToken?: string | null }> = ({
@@ -43,7 +45,10 @@ export const EngineeringWorkbenchTab: React.FC<{ canEdit: boolean; accessToken?:
   const [oneTimeKeyNotice, setOneTimeKeyNotice] = useState('');
   const [timeRange, setTimeRange] = useState<'Live' | '1h' | '24h' | '7d' | '30d' | 'Custom'>('Live');
   const [telemetry, setTelemetry] = useState<TelemetryReading[]>([]);
+  const [devices, setDevices] = useState<Array<{ id: string; device_uid: string; firmware_version?: string; device_health?: string; last_heartbeat_at?: string | null; revoked?: boolean }>>([]);
+  const [deviceErrorCount, setDeviceErrorCount] = useState(0);
   const [telemetrySource, setTelemetrySource] = useState<'none' | 'csv_upload' | 'live_hardware'>('none');
+  const [realtimeStatus, setRealtimeStatus] = useState<'disconnected' | 'subscribing' | 'live'>('disconnected');
   const [csvNotice, setCsvNotice] = useState('');
   const [syncNotice, setSyncNotice] = useState('');
 
@@ -85,8 +90,17 @@ export const EngineeringWorkbenchTab: React.FC<{ canEdit: boolean; accessToken?:
         if (!active) return;
         if (telResp.ok) {
           const telData = await telResp.json();
+          if (Array.isArray(telData.turbines) && telData.turbines.length > 0) {
+            setTurbines(telData.turbines.map(mapDbTurbineRow));
+          }
+          if (Array.isArray(telData.devices)) {
+            setDevices(telData.devices);
+          }
+          if (Array.isArray(telData.deviceErrors)) {
+            setDeviceErrorCount(telData.deviceErrors.length);
+          }
           if (Array.isArray(telData.telemetry) && telData.telemetry.length > 0) {
-            setTelemetry(telData.telemetry);
+            setTelemetry(telData.telemetry.map(mapDbTelemetryRow));
             setTelemetrySource('live_hardware');
           }
           if (Array.isArray(telData.testRuns) && telData.testRuns.length > 0) {
@@ -136,8 +150,34 @@ export const EngineeringWorkbenchTab: React.FC<{ canEdit: boolean; accessToken?:
         if (active) setSyncNotice('Cloud sync check unavailable offline.');
       }
     })();
+
+    const client = getSupabaseClient();
+    let channel: ReturnType<NonNullable<typeof client>['channel']> | null = null;
+    if (client) {
+      channel = client
+        .channel('ps-telemetry-realtime')
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'telemetry' },
+          (payload) => {
+            if (!active || !payload?.new) return;
+            const mapped = mapDbTelemetryRow(payload.new as Record<string, any>);
+            setTelemetry((prev) => [...prev.slice(-499), mapped]);
+            setTelemetrySource('live_hardware');
+          }
+        )
+        .subscribe((status) => {
+          if (!active) return;
+          if (status === 'SUBSCRIBED') setRealtimeStatus('live');
+          else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') setRealtimeStatus('disconnected');
+        });
+    }
+
     return () => {
       active = false;
+      if (channel && client) {
+        client.removeChannel(channel);
+      }
     };
   }, [accessToken]);
 
@@ -326,8 +366,9 @@ export const EngineeringWorkbenchTab: React.FC<{ canEdit: boolean; accessToken?:
     }
   };
 
-  const bins = useMemo(() => computePowerCurveBins(telemetry, 1.0), [telemetry]);
-  const onlineCount = turbines.filter((t) => t.operationalState === 'test_active').length;
+  const visibleTelemetry = useMemo(() => filterTelemetryByRange(telemetry, timeRange), [telemetry, timeRange]);
+  const bins = useMemo(() => computePowerCurveBins(visibleTelemetry, 1.0), [visibleTelemetry]);
+  const onlineCount = devices.filter((d) => !d.revoked && d.device_health === 'online').length;
 
   return (
     <div className="space-y-8">
@@ -340,15 +381,15 @@ export const EngineeringWorkbenchTab: React.FC<{ canEdit: boolean; accessToken?:
               <h2 className="font-display text-lg font-bold text-[#141A18]">
                 Engineering Telemetry Overview —{' '}
                 {telemetrySource === 'live_hardware'
-                  ? 'Live Hardware Stream Active'
+                  ? 'MEASURED Live Hardware Stream Active'
                   : telemetrySource === 'csv_upload'
                   ? 'Uploaded CSV Data (Not Live Hardware)'
-                  : 'No live telemetry connected'}
+                  : 'Simulation Mode — No live hardware data connected.'}
               </h2>
               <p className="text-xs text-[#434E4A]">
                 {telemetrySource === 'live_hardware'
-                  ? 'Verified HMAC-SHA256 ESP32/STM32 feed persisted.'
-                  : '0 live hardware devices streaming. Monitoring-only architecture: zero remote turbine actuation or brake override commands exist.'}
+                  ? `Verified HMAC-SHA256 ESP32/STM32 feed persisted (${realtimeStatus === 'live' ? 'Realtime channel SUBSCRIBED' : 'Polling/Snapshot'}).`
+                  : `0 live hardware devices streaming (Realtime: ${realtimeStatus}). Monitoring-only architecture: zero remote turbine actuation or brake override commands exist.`}
               </p>
               {syncNotice && <p className="mt-1 font-mono text-[11px] text-[#0B2B22]">{syncNotice}</p>}
             </div>
@@ -372,11 +413,18 @@ export const EngineeringWorkbenchTab: React.FC<{ canEdit: boolean; accessToken?:
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6 text-xs">
           {[
             ['Registered Turbines', String(turbines.length)],
-            ['Online / Offline', `${onlineCount} / ${turbines.length - onlineCount}`],
-            ['Current Wind', telemetry.length ? `${telemetry[telemetry.length - 1].windSpeedMs} m/s` : '--'],
-            ['Current Power', telemetry.length ? `${telemetry[telemetry.length - 1].powerW} W` : '--'],
-            ['Data Completeness', telemetry.length ? 'CSV Loaded' : '0.0% (No live link)'],
-            ['Safety Control', 'Monitoring Only'],
+            ['Online Devices', `${onlineCount} / ${devices.length}`],
+            ['Current Wind', visibleTelemetry.length ? `${visibleTelemetry[visibleTelemetry.length - 1].windSpeedMs} m/s` : 'UNAVAILABLE'],
+            ['Current Power', visibleTelemetry.length ? `${visibleTelemetry[visibleTelemetry.length - 1].powerW} W` : 'UNAVAILABLE'],
+            [
+              'Data Provenance',
+              telemetrySource === 'live_hardware'
+                ? 'MEASURED (HMAC DB)'
+                : telemetrySource === 'csv_upload'
+                ? 'SIMULATED / CSV LOADED'
+                : 'UNAVAILABLE (0.0% live)',
+            ],
+            ['Device Errors', `${deviceErrorCount} logged`],
           ].map(([k, v]) => (
             <div key={k} className="rounded-xl border border-[#DDE2DC] bg-[#F6F7F4] p-3">
               <div className="text-[#434E4A]">{k}</div>

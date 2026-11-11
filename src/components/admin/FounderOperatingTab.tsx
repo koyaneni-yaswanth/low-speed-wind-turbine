@@ -5,8 +5,15 @@ import { calculateLcoeDcf } from '../../lib/physics.ts';
 import type { BomItem, ProjectTaskItem } from '../../types/index.ts';
 import { EvidenceBadge } from '../common/EvidenceBadge.tsx';
 
-export const FounderOperatingTab: React.FC<{ canViewFinancials: boolean; accessToken?: string | null }> = ({
+export const FounderOperatingTab: React.FC<{
+  canViewFinancials: boolean;
+  canEditFinancials?: boolean;
+  canManageReports?: boolean;
+  accessToken?: string | null;
+}> = ({
   canViewFinancials,
+  canEditFinancials = false,
+  canManageReports = false,
   accessToken,
 }) => {
   // Editable DCF LCOE inputs
@@ -26,7 +33,9 @@ export const FounderOperatingTab: React.FC<{ canViewFinancials: boolean; accessT
   const lcoeResult = useMemo(() => calculateLcoeDcf(lcoeInput), [lcoeInput]);
 
   // BOM & Batch Scenarios
-  const [bomItems] = useState<BomItem[]>(INITIAL_BOM_ITEMS);
+  const [bomItems, setBomItems] = useState<BomItem[]>(INITIAL_BOM_ITEMS);
+  const [savedScenariosCount, setSavedScenariosCount] = useState<number | null>(null);
+  const [liveTelemetrySummary, setLiveTelemetrySummary] = useState<{ devices: number; online: number; readings: number } | null>(null);
   const [batchPreset, setBatchPreset] = useState<'prototype' | '1-unit' | '3-unit' | '10-unit' | '50-unit'>('prototype');
   const [proposedSalePriceInr, setProposedSalePriceInr] = useState(72000);
   const [commentary, setCommentary] = useState(
@@ -44,31 +53,70 @@ export const FounderOperatingTab: React.FC<{ canViewFinancials: boolean; accessT
     let active = true;
     (async () => {
       try {
-        const resp = await fetch('/api/admin', { headers: { Authorization: `Bearer ${accessToken}` } });
-        if (!active || !resp.ok) return;
-        const data = await resp.json();
-        if (Array.isArray(data.tasks) && data.tasks.length > 0) {
-          setTasks(
-            data.tasks.map((t: any, idx: number) => ({
-              id: t.id,
-              taskCode: t.task_code || `T-${idx + 1}`,
-              workstream: t.workstream || t.track,
-              title: t.title,
-              description: t.description || '',
-              track: t.track,
-              owner: t.owner,
-              supportingMembers: Array.isArray(t.supporting_members) ? t.supporting_members : [],
-              priority: t.priority || 'P1',
-              offsetStartDay: idx * 3 + 1,
-              durationDays: 10,
-              status: t.status || 'todo',
-              dependencies: Array.isArray(t.dependencies) ? t.dependencies : [],
-              acceptanceCriteria: t.acceptance_criteria || '',
-              evidenceAttachment: t.evidence_attachment || '',
-              reviewer: t.reviewer || 'Founder',
-            }))
-          );
-          setTaskSyncNotice('Loaded tasks from Supabase.');
+        const requests: Promise<Response>[] = [
+          fetch('/api/admin', { headers: { Authorization: `Bearer ${accessToken}` } }),
+          fetch('/api/telemetry', { headers: { Authorization: `Bearer ${accessToken}` } }),
+        ];
+        if (canViewFinancials) {
+          requests.push(fetch('/api/admin?action=financials', { headers: { Authorization: `Bearer ${accessToken}` } }));
+        }
+        const [admResp, telResp, finResp] = await Promise.all(requests);
+        if (!active) return;
+
+        if (admResp?.ok) {
+          const data = await admResp.json();
+          if (Array.isArray(data.tasks) && data.tasks.length > 0) {
+            setTasks(
+              data.tasks.map((t: any, idx: number) => ({
+                id: t.id,
+                taskCode: t.task_code || `T-${idx + 1}`,
+                workstream: t.workstream || t.track,
+                title: t.title,
+                description: t.description || '',
+                track: t.track,
+                owner: t.owner,
+                supportingMembers: Array.isArray(t.supporting_members) ? t.supporting_members : [],
+                priority: t.priority || 'P1',
+                offsetStartDay: idx * 3 + 1,
+                durationDays: 10,
+                status: t.status || 'todo',
+                dependencies: Array.isArray(t.dependencies) ? t.dependencies : [],
+                acceptanceCriteria: t.acceptance_criteria || '',
+                evidenceAttachment: t.evidence_attachment || '',
+                reviewer: t.reviewer || 'Founder',
+              }))
+            );
+            setTaskSyncNotice('Synced live tasks from Supabase.');
+          }
+        }
+        if (telResp?.ok) {
+          const tData = await telResp.json();
+          const devs = Array.isArray(tData.devices) ? tData.devices : [];
+          setLiveTelemetrySummary({
+            devices: devs.length,
+            online: devs.filter((d: any) => !d.revoked && d.device_health === 'online').length,
+            readings: Array.isArray(tData.telemetry) ? tData.telemetry.length : 0,
+          });
+        }
+        if (finResp?.ok) {
+          const fData = await finResp.json();
+          if (Array.isArray(fData.bomItems) && fData.bomItems.length > 0) {
+            setBomItems(
+              fData.bomItems.map((b: any) => ({
+                id: b.id,
+                component: b.component,
+                subsystem: b.subsystem,
+                prototypeCostInr: Number(b.prototype_cost_inr || 0),
+                targetCostInr: Number(b.target_cost_inr || 0),
+                basis: b.basis || 'COMMERCIAL_ASSUMPTION',
+                vendorQuoteCount: 0,
+                notes: b.notes || '',
+              }))
+            );
+          }
+          if (Array.isArray(fData.financialScenarios)) {
+            setSavedScenariosCount(fData.financialScenarios.length);
+          }
         }
       } catch {
         if (active) setTaskSyncNotice('Cloud task fetch unavailable offline.');
@@ -77,7 +125,7 @@ export const FounderOperatingTab: React.FC<{ canViewFinancials: boolean; accessT
     return () => {
       active = false;
     };
-  }, [accessToken]);
+  }, [accessToken, canViewFinancials]);
 
   const handleTaskStatusChange = async (task: ProjectTaskItem, nextStatus: ProjectTaskItem['status']) => {
     setTasks((prev) => prev.map((x) => (x.id === task.id ? { ...x, status: nextStatus } : x)));
@@ -196,19 +244,24 @@ export const FounderOperatingTab: React.FC<{ canViewFinancials: boolean; accessT
           <div className="rounded-xl border border-[#DDE2DC] p-3.5 space-y-1">
             <div className="font-bold text-[#0B2B22]">A. Engineering &amp; Telemetry</div>
             <div>Stage: TRL 4 (Mark-3/4/5)</div>
-            <div>Live Telemetry: 0 online devices</div>
+            <div>
+              Live Telemetry:{' '}
+              {liveTelemetrySummary === null
+                ? 'Unavailable (Offline)'
+                : `${liveTelemetrySummary.online} online / ${liveTelemetrySummary.readings} logged`}
+            </div>
             <div>Dyno Shootout: Pending</div>
           </div>
           <div className="rounded-xl border border-[#DDE2DC] p-3.5 space-y-1">
             <div className="font-bold text-[#0B2B22]">B. Manufacturing &amp; BOM</div>
             <div>Est. Prototype BOM: ₹{protoTotalBom.toLocaleString('en-IN')}</div>
-            <div>Vendor Quotes Attached: 0</div>
+            <div>Saved Scenarios: {savedScenariosCount === null ? 'Unavailable' : savedScenariosCount}</div>
             <div>Target Unit BOM: ₹{targetTotalBom.toLocaleString('en-IN')}</div>
           </div>
           <div className="rounded-xl border border-[#DDE2DC] p-3.5 space-y-1">
             <div className="font-bold text-[#0B2B22]">C. Commercial Pipeline</div>
-            <div>Signed LOIs / Pilots: 0 / 0</div>
-            <div>Site Surveys Logged: 0</div>
+            <div>Signed LOIs / Pilots: Unavailable until CRM sync (0 verified)</div>
+            <div>Site Surveys Logged: Unavailable until CRM sync</div>
             <div>Recognized Revenue: ₹0</div>
           </div>
           <div className="rounded-xl border border-[#DDE2DC] p-3.5 space-y-1">
@@ -228,6 +281,58 @@ export const FounderOperatingTab: React.FC<{ canViewFinancials: boolean; accessT
             className="w-full rounded-xl border border-[#DDE2DC] p-2.5 text-xs"
           />
         </label>
+        {canManageReports && accessToken && (
+          <div className="no-print flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={async () => {
+                const resp = await fetch('/api/admin', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+                  body: JSON.stringify({
+                    action: 'save_monthly_report',
+                    reportMonth: sprintStartDate.slice(0, 7),
+                    commentary,
+                    pillars: { liveTelemetrySummary, openTasks: tasks.filter((t) => t.status !== 'done').length },
+                  }),
+                });
+                setTaskSyncNotice(resp.ok ? 'Saved monthly snapshot to Supabase.' : `Monthly snapshot save failed (${resp.status}).`);
+              }}
+              className="rounded-xl border border-[#0B2B22] px-3 py-1.5 text-xs font-semibold text-[#0B2B22]"
+            >
+              Persist Monthly Snapshot to DB
+            </button>
+            {canEditFinancials && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const batchCount = batchPreset === 'prototype' ? 1 : Number(batchPreset.split('-')[0]) || 1;
+                  const resp = await fetch('/api/admin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+                    body: JSON.stringify({
+                      action: 'save_bom_scenario',
+                      name: `${batchPreset} Commercial Scenario`,
+                      batchSize: batchCount,
+                      unitBomInr: estimatedBatchBom,
+                      proposedSalePriceInr,
+                      assumptionsNote: `LCOE est. ₹${lcoeResult.lcoeInrPerKwh ?? 'N/A'}/kWh (Assumption)`,
+                    }),
+                  });
+                  if (resp.ok) {
+                    setSavedScenariosCount((c) => (c ?? 0) + 1);
+                    setTaskSyncNotice(`Saved ${batchPreset} BOM scenario to Supabase.`);
+                  } else {
+                    setTaskSyncNotice(`Scenario save failed (${resp.status}).`);
+                  }
+                }}
+                className="rounded-xl border border-[#DDE2DC] px-3 py-1.5 text-xs font-semibold text-[#141A18]"
+              >
+                Save BOM Scenario
+              </button>
+            )}
+          </div>
+        )}
       </section>
 
       {/* Financial Scenario & DCF LCOE Simulator (Restricted for team_member) */}

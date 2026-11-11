@@ -7,6 +7,7 @@ import {
   parseJsonBody,
   recordAuditLog,
   requirePermission,
+  safeServerError,
   verifyDeviceHmacSignature,
   type DbAdapter,
   type ServerRequest,
@@ -202,7 +203,8 @@ export function createTelemetryHandler(dbFactory: () => DbAdapter = createSupaba
           if (error.toLowerCase().includes('duplicate') || error.toLowerCase().includes('unique')) {
             return res.status(200).json({ deduplicated: true, sequenceNo: t.sequence_no });
           }
-          return res.status(500).json({ error });
+          safeServerError(res, 'telemetry:ingest', error);
+          return;
         }
 
         await db.updateRows(
@@ -240,7 +242,10 @@ export function createTelemetryHandler(dbFactory: () => DbAdapter = createSupaba
           device_health: 'registered_offline',
           revoked: false,
         });
-        if (error) return res.status(500).json({ error });
+        if (error) {
+          safeServerError(res, 'telemetry:register_device', error);
+          return;
+        }
         await recordAuditLog(db, actor!, 'register_device', 'device', created?.id ?? null, { deviceUid: reg.data.deviceUid });
         return res.status(201).json({
           device: { id: created?.id, deviceUid: reg.data.deviceUid, samplingIntervalSec: reg.data.samplingIntervalSec },
@@ -276,7 +281,10 @@ export function createTelemetryHandler(dbFactory: () => DbAdapter = createSupaba
           approval_status: 'pending_review',
           evidence_tier: 'PROTOTYPE_OBSERVATION',
         });
-        if (error) return res.status(500).json({ error });
+        if (error) {
+          safeServerError(res, 'telemetry:create_test_run', error);
+          return;
+        }
         await recordAuditLog(db, actor!, 'create_test_run', 'test_run', run?.id ?? null);
         return res.status(201).json({ testRun: run });
       }

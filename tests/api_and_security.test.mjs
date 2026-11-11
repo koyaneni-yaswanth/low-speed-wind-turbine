@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { hasPermission } from '../src/lib/authAndRbac.ts';
+import { filterTelemetryByRange, mapDbTelemetryRow, mapDbTurbineRow } from '../src/lib/telemetryMappers.ts';
 import { createInquiriesHandler } from '../api/inquiries.ts';
 import { createTelemetryHandler } from '../api/telemetry.ts';
 import { createAdminHandler } from '../api/admin.ts';
@@ -451,5 +452,105 @@ test('Security Hardening: rejects malformed JSON (400), duplicate pilot (409), P
   );
   assert.equal(regDevRes.statusCode, 201);
   assert.match(regDevRes.payload.oneTimeDeviceKey, /^ps_dev_/);
+});
+
+test('Phase 2-6 Cloud Hardening: Storage RLS SQL, Telemetry DB Mappers, Auth Flows, Turbine Upsert & Sanitized Errors', async () => {
+  // 1. Storage migration checks
+  const sql3 = fs.readFileSync(path.join(process.cwd(), 'supabase/migrations/003_storage_buckets_and_policies.sql'), 'utf-8');
+  assert.ok(sql3.includes("'public-docs'"));
+  assert.ok(sql3.includes("'dataroom-private'"));
+  assert.ok(sql3.includes("'telemetry-csvs'"));
+  assert.ok(sql3.includes('on storage.objects for select'));
+  assert.ok(!sql3.includes('alter table storage.objects enable row level security'));
+
+  // 2. Admin portal auth flow completeness
+  const adminTsx = fs.readFileSync(path.join(process.cwd(), 'src/pages/AdminPortalPage.tsx'), 'utf-8');
+  assert.ok(adminTsx.includes('signUp('));
+  assert.ok(adminTsx.includes('resetPasswordForEmail('));
+  assert.ok(adminTsx.includes('PASSWORD_RECOVERY'));
+  assert.ok(adminTsx.includes('canAccessAdminRoute'));
+
+  // 3. DB snake_case -> camelCase telemetry & turbine mappers + time range filter
+  const mappedTel = mapDbTelemetryRow({
+    id: 'row-1',
+    site_id: 'VNIT-01',
+    turbine_id: 't-1',
+    device_timestamp: '2026-11-11T10:00:00Z',
+    wind_speed_ms: 3.8,
+    rotor_rpm: 210,
+    dc_voltage_v: 12.5,
+    dc_current_a: 1.2,
+    power_w: 15,
+    data_quality_status: 'valid',
+  });
+  assert.equal(mappedTel.windSpeedMs, 3.8);
+  assert.equal(mappedTel.powerW, 15);
+  assert.equal(mappedTel.dataQualityStatus, 'valid');
+  assert.equal(mappedTel.timestamp, '2026-11-11T10:00:00Z');
+
+  const mappedTurbine = mapDbTurbineRow({
+    id: 'tu-1',
+    turbine_code: 'PS-OPT-A',
+    prototype_version: 'Option A Dyno',
+    gear_architecture: 'Coaxial Magnetic',
+    installation_site: 'VNIT Lab',
+    safety_status: 'monitoring_only_no_remote_actuation',
+  });
+  assert.equal(mappedTurbine.turbineId, 'PS-OPT-A');
+  assert.equal(mappedTurbine.transmissionType, 'Coaxial Magnetic');
+
+  const recentRows = filterTelemetryByRange(
+    [
+      { ...mappedTel, timestamp: new Date(Date.now() - 10 * 60_000).toISOString() },
+      { ...mappedTel, id: 'row-old', timestamp: '2025-01-01T00:00:00Z' },
+    ],
+    '1h'
+  );
+  assert.equal(recentRows.length, 1);
+
+  // 4. Sanitized HTTP 500 errors & idempotent turbine upsert
+  const actors = { 'tok-eng': { userId: 'u-eng', email: 'eng@pawanshakti.local', role: 'engineering_admin' } };
+  const { adapter } = createInMemoryDb(actors);
+  const adm = createAdminHandler(() => adapter);
+
+  const insRes = createMockRes();
+  await adm(
+    {
+      method: 'POST',
+      headers: { authorization: 'Bearer tok-eng' },
+      body: { action: 'upsert_turbine', turbineCode: 'PS-TRL4-TEST', prototypeVersion: 'v1' },
+    },
+    insRes
+  );
+  assert.equal(insRes.statusCode, 201);
+
+  const updRes = createMockRes();
+  await adm(
+    {
+      method: 'POST',
+      headers: { authorization: 'Bearer tok-eng' },
+      body: { action: 'upsert_turbine', turbineCode: 'PS-TRL4-TEST', prototypeVersion: 'v2' },
+    },
+    updRes
+  );
+  assert.equal(updRes.statusCode, 200);
+  assert.equal(updRes.payload.turbine.prototype_version, 'v2');
+
+  const failingAdapter = {
+    ...adapter,
+    insertRow: async () => ({ data: null, error: 'relation "public.tasks" violates secret_internal_constraint' }),
+  };
+  const failAdm = createAdminHandler(() => failingAdapter);
+  const failRes = createMockRes();
+  await failAdm(
+    {
+      method: 'POST',
+      headers: { authorization: 'Bearer tok-eng' },
+      body: { action: 'upsert_task', title: 'Test', track: 'Aero', owner: 'Founder' },
+    },
+    failRes
+  );
+  assert.equal(failRes.statusCode, 500);
+  assert.ok(!String(failRes.payload.error).includes('secret_internal_constraint'));
 });
 

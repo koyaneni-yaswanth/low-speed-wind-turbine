@@ -234,6 +234,12 @@ export function verifyDeviceHmacSignature(params: {
   return { valid: true };
 }
 
+export function safeServerError(res: ServerResponse, context: string, rawError: unknown, status = 500): void {
+  const detail = rawError instanceof Error ? rawError.message : String(rawError || 'unknown');
+  console.error(`[pawan-shakti][${context}]`, detail);
+  res.status(status).json({ error: 'Internal server database operation failed.' });
+}
+
 export function requirePermission(actor: AuthenticatedActor | null, scope: PermissionScope): { ok: true } | { ok: false; status: number; error: string } {
   if (!actor) {
     return { ok: false, status: 401, error: 'Authentication required (missing or invalid Supabase JWT).' };

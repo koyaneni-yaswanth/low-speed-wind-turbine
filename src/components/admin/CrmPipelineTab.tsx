@@ -164,11 +164,22 @@ export const CrmPipelineTab: React.FC<{ canView: boolean; canEdit: boolean; acce
   const updateStage = async (id: string, nextStage: PipelineStage) => {
     if (!canEdit) return;
     if (accessToken) {
-      await fetch('/api/inquiries', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ leadId: id, toStage: nextStage }),
-      }).catch(() => {});
+      try {
+        const resp = await fetch('/api/inquiries', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify({ leadId: id, toStage: nextStage }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          setStatusNotice(`Stage update failed: ${err.error || `HTTP ${resp.status}`}`);
+          return;
+        }
+        setStatusNotice(`Updated CRM stage cleanly to "${nextStage}".`);
+      } catch {
+        setStatusNotice('Network error updating CRM stage in Supabase.');
+        return;
+      }
     }
     setLeads((prev) =>
       prev.map((l) => (l.id === id ? { ...l, stage: nextStage, updatedAt: new Date().toISOString() } : l))

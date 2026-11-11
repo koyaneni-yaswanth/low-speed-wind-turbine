@@ -3,6 +3,7 @@ import {
   createSupabaseDbAdapter,
   parseJsonBody,
   requirePermission,
+  safeServerError,
   type DbAdapter,
   type ServerRequest,
   type ServerResponse,
@@ -42,7 +43,10 @@ export function createAnalyticsHandler(dbFactory: () => DbAdapter = createSupaba
         path: parsed.data.path,
         meta: parsed.data.meta || {},
       });
-      if (error) return res.status(500).json({ error });
+      if (error) {
+        safeServerError(res, 'analytics:post', error);
+        return;
+      }
       return res.status(201).json({ recorded: true });
     }
 
@@ -52,7 +56,10 @@ export function createAnalyticsHandler(dbFactory: () => DbAdapter = createSupaba
       if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
 
       const { data, error } = await db.selectRows('analytics_events', {}, 500);
-      if (error) return res.status(500).json({ error });
+      if (error) {
+        safeServerError(res, 'analytics:get', error);
+        return;
+      }
       return res.status(200).json({ events: data });
     }
 

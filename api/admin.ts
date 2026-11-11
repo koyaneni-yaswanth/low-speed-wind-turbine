@@ -4,6 +4,7 @@ import {
   parseJsonBody,
   recordAuditLog,
   requirePermission,
+  safeServerError,
   type DbAdapter,
   type ServerRequest,
   type ServerResponse,
@@ -133,7 +134,7 @@ export function createAdminHandler(dbFactory: () => DbAdapter = createSupabaseDb
           return res.status(400).json({ error: 'Invalid turbine configuration payload.' });
         }
         const t = parsed.data;
-        const { data, error } = await db.insertRow('turbines', {
+        const turbinePayload = {
           turbine_code: t.turbineCode,
           prototype_version: t.prototypeVersion,
           rotor_diameter_m: t.rotorDiameterM ?? null,
@@ -152,8 +153,26 @@ export function createAdminHandler(dbFactory: () => DbAdapter = createSupabaseDb
           sensor_configuration: t.sensorConfiguration || 'Monitoring Only',
           safety_status: 'monitoring_only_no_remote_actuation',
           operational_state: 'bench_idle',
-        });
-        if (error) return res.status(500).json({ error });
+        };
+        const { data: existingTurbines } = await db.selectRows('turbines', { turbine_code: t.turbineCode }, 1);
+        if (existingTurbines.length > 0) {
+          const { data: updatedRows, error: updateErr } = await db.updateRows(
+            'turbines',
+            { id: existingTurbines[0].id },
+            turbinePayload
+          );
+          if (updateErr) {
+            safeServerError(res, 'admin:upsert_turbine_update', updateErr);
+            return;
+          }
+          await recordAuditLog(db, actor, 'upsert_turbine', 'turbine', existingTurbines[0].id, { turbineCode: t.turbineCode });
+          return res.status(200).json({ turbine: updatedRows[0] || existingTurbines[0] });
+        }
+        const { data, error } = await db.insertRow('turbines', turbinePayload);
+        if (error) {
+          safeServerError(res, 'admin:upsert_turbine', error);
+          return;
+        }
         await recordAuditLog(db, actor, 'upsert_turbine', 'turbine', data?.id ?? null, { turbineCode: t.turbineCode });
         return res.status(201).json({ turbine: data });
       }
@@ -165,7 +184,7 @@ export function createAdminHandler(dbFactory: () => DbAdapter = createSupabaseDb
         if (!parsed.success) {
           return res.status(400).json({ error: 'Scores must be valid numeric values between 1 and 5 or null.' });
         }
-        const { data } = await db.updateRows(
+        const { data, error } = await db.updateRows(
           'option_comparisons',
           { id: parsed.data.id },
           {
@@ -174,6 +193,10 @@ export function createAdminHandler(dbFactory: () => DbAdapter = createSupabaseDb
             updated_at: new Date().toISOString(),
           }
         );
+        if (error) {
+          safeServerError(res, 'admin:score_option_comparison', error);
+          return;
+        }
         await recordAuditLog(db, actor, 'score_option_comparison', 'option_comparison', parsed.data.id, {
           optionAScore: parsed.data.optionAScore,
           optionBScore: parsed.data.optionBScore,
@@ -199,7 +222,10 @@ export function createAdminHandler(dbFactory: () => DbAdapter = createSupabaseDb
           if (tk.evidenceAttachment !== undefined) patch.evidence_attachment = tk.evidenceAttachment;
           if (tk.reviewer !== undefined) patch.reviewer = tk.reviewer;
           const { data, error } = await db.updateRows('tasks', { id: tk.id }, patch);
-          if (error) return res.status(500).json({ error });
+          if (error) {
+            safeServerError(res, 'admin:update_task', error);
+            return;
+          }
           await recordAuditLog(db, actor, 'update_task', 'task', tk.id, { status: tk.status });
           return res.status(200).json({ task: data[0] || null });
         }
@@ -220,7 +246,10 @@ export function createAdminHandler(dbFactory: () => DbAdapter = createSupabaseDb
           evidence_attachment: tk.evidenceAttachment || null,
           reviewer: tk.reviewer || actor.email,
         });
-        if (error) return res.status(500).json({ error });
+        if (error) {
+          safeServerError(res, 'admin:create_task', error);
+          return;
+        }
         await recordAuditLog(db, actor, 'create_task', 'task', data?.id ?? null);
         return res.status(201).json({ task: data });
       }
@@ -231,7 +260,11 @@ export function createAdminHandler(dbFactory: () => DbAdapter = createSupabaseDb
         const docId = String(body.id || '');
         const vis = body.visibility === 'public' ? 'public' : 'private';
         if (!docId) return res.status(400).json({ error: 'Document id required.' });
-        const { data } = await db.updateRows('product_documents', { id: docId }, { visibility: vis });
+        const { data, error } = await db.updateRows('product_documents', { id: docId }, { visibility: vis });
+        if (error) {
+          safeServerError(res, 'admin:toggle_document_visibility', error);
+          return;
+        }
         await recordAuditLog(db, actor, 'toggle_document_visibility', 'product_document', docId, { visibility: vis });
         return res.status(200).json({ updated: data });
       }
@@ -248,7 +281,11 @@ export function createAdminHandler(dbFactory: () => DbAdapter = createSupabaseDb
           updated_at: new Date().toISOString(),
         };
         if (patentId) {
-          const { data } = await db.updateRows('patents', { id: patentId }, patch);
+          const { data, error } = await db.updateRows('patents', { id: patentId }, patch);
+          if (error) {
+            safeServerError(res, 'admin:update_patent', error);
+            return;
+          }
           await recordAuditLog(db, actor, 'update_patent', 'patent', patentId, patch);
           return res.status(200).json({ patent: data[0] || null });
         }
@@ -259,7 +296,10 @@ export function createAdminHandler(dbFactory: () => DbAdapter = createSupabaseDb
           published_year: Number(body.publishedYear || 2025),
           ...patch,
         });
-        if (error) return res.status(500).json({ error });
+        if (error) {
+          safeServerError(res, 'admin:create_patent', error);
+          return;
+        }
         await recordAuditLog(db, actor, 'create_patent', 'patent', data?.id ?? null, patch);
         return res.status(201).json({ patent: data });
       }
@@ -278,7 +318,10 @@ export function createAdminHandler(dbFactory: () => DbAdapter = createSupabaseDb
           funding_received_inr: Number(body.fundingReceivedInr || 0),
           assumptions_note: String(body.assumptionsNote || 'Commercial assumption'),
         });
-        if (error) return res.status(500).json({ error });
+        if (error) {
+          safeServerError(res, 'admin:save_bom_scenario', error);
+          return;
+        }
         await recordAuditLog(db, actor, 'save_financial_scenario', 'financial_scenario', data?.id ?? null);
         return res.status(201).json({ scenario: data });
       }
@@ -292,7 +335,10 @@ export function createAdminHandler(dbFactory: () => DbAdapter = createSupabaseDb
           commentary: String(body.commentary || ''),
           created_by: actor.email,
         });
-        if (error) return res.status(500).json({ error });
+        if (error) {
+          safeServerError(res, 'admin:save_monthly_report', error);
+          return;
+        }
         await recordAuditLog(db, actor, 'save_monthly_report', 'monthly_report', data?.id ?? null);
         return res.status(201).json({ report: data });
       }

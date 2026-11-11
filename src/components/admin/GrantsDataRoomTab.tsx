@@ -3,6 +3,7 @@ import { Lock, Unlock } from 'lucide-react';
 import { DATA_ROOM_CHECKLIST, INITIAL_GRANT_SCHEMES, RESOURCE_DOCUMENTS } from '../../data/pawanShaktiData.ts';
 import type { ResourceDocumentItem } from '../../types/index.ts';
 import { getTrackedEvents } from '../../lib/analytics.ts';
+import { getSupabaseClient } from '../../lib/supabase.ts';
 import { ROLE_LABELS, hasPermission } from '../../lib/authAndRbac.ts';
 import type { UserRole } from '../../types/index.ts';
 
@@ -10,10 +11,13 @@ export const GrantsDataRoomTab: React.FC<{
   canViewDataRoom: boolean;
   canManageCms: boolean;
   canViewAudit: boolean;
+  canViewPrivateDocs?: boolean;
   accessToken?: string | null;
-}> = ({ canViewDataRoom, canManageCms, canViewAudit, accessToken }) => {
+}> = ({ canViewDataRoom, canManageCms, canViewAudit, canViewPrivateDocs = false, accessToken }) => {
   const [docs, setDocs] = useState<ResourceDocumentItem[]>(RESOURCE_DOCUMENTS);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [privateFiles, setPrivateFiles] = useState<Array<{ name: string; id?: string | null }>>([]);
+  const [storageNotice, setStorageNotice] = useState('');
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({
     'Published Indian Patent Documents (+ Official Application No.)': true,
     'Real Prototype Photographs (Mark-3 / Mark-4 / Mark-5)': true,
@@ -57,6 +61,17 @@ export const GrantsDataRoomTab: React.FC<{
             if (Array.isArray(aData.auditLogs)) setAuditLogs(aData.auditLogs);
           }
         }
+        const client = getSupabaseClient();
+        if (client && canViewPrivateDocs) {
+          const { data: listed, error: listErr } = await client.storage.from('dataroom-private').list('', { limit: 50 });
+          if (active && !listErr && Array.isArray(listed)) {
+            setPrivateFiles(
+              listed
+                .filter((f) => f.name !== '.emptyFolderPlaceholder')
+                .map((f) => ({ name: f.name, id: f.id }))
+            );
+          }
+        }
       } catch {
         // offline gracefully handled
       }
@@ -64,7 +79,32 @@ export const GrantsDataRoomTab: React.FC<{
     return () => {
       active = false;
     };
-  }, [canViewDataRoom, canViewAudit, accessToken]);
+  }, [canViewDataRoom, canViewAudit, canViewPrivateDocs, accessToken]);
+
+  const handleUploadPrivateFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const client = getSupabaseClient();
+    if (!file || !client || !canManageCms) return;
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const { error } = await client.storage.from('dataroom-private').upload(safeName, file, { upsert: true });
+    if (error) {
+      setStorageNotice(`Upload denied or failed: ${error.message}`);
+      return;
+    }
+    setStorageNotice(`Uploaded "${safeName}" securely to private bucket dataroom-private.`);
+    setPrivateFiles((prev) => [{ name: safeName }, ...prev.filter((f) => f.name !== safeName)]);
+  };
+
+  const handleOpenSignedUrl = async (name: string) => {
+    const client = getSupabaseClient();
+    if (!client) return;
+    const { data, error } = await client.storage.from('dataroom-private').createSignedUrl(name, 120);
+    if (error || !data?.signedUrl) {
+      setStorageNotice(`Signed URL denied: ${error?.message || 'Unauthorized'}`);
+      return;
+    }
+    window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+  };
 
   if (!canViewDataRoom) {
     return (
@@ -168,6 +208,36 @@ export const GrantsDataRoomTab: React.FC<{
               </div>
             ))}
           </div>
+          {canViewPrivateDocs && (
+            <div className="border-t border-[#DDE2DC] pt-3 space-y-2 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-semibold text-[#141A18]">Confidential Bucket (`dataroom-private`)</span>
+                {canManageCms && accessToken && (
+                  <label className="cursor-pointer rounded-lg border border-[#0B2B22] px-2.5 py-1 font-semibold text-[#0B2B22]">
+                    Upload Confidential Doc
+                    <input type="file" onChange={handleUploadPrivateFile} className="sr-only" />
+                  </label>
+                )}
+              </div>
+              {storageNotice && <p className="font-mono text-[11px] text-[#0B2B22]">{storageNotice}</p>}
+              {privateFiles.length === 0 ? (
+                <p className="text-[11px] text-[#434E4A]">0 private storage objects listed (or offline).</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {privateFiles.map((f) => (
+                    <button
+                      key={f.name}
+                      type="button"
+                      onClick={() => handleOpenSignedUrl(f.name)}
+                      className="rounded border border-[#DDE2DC] bg-[#F6F7F4] px-2 py-1 font-mono text-[10px] text-[#141A18] hover:bg-emerald-50"
+                    >
+                      {f.name} (Signed URL)
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </section>
       </div>
 

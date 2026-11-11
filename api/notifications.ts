@@ -3,6 +3,7 @@ import {
   parseJsonBody,
   recordAuditLog,
   requirePermission,
+  safeServerError,
   type DbAdapter,
   type ServerRequest,
   type ServerResponse,
@@ -71,7 +72,10 @@ export function createNotificationsHandler(dbFactory: () => DbAdapter = createSu
 
     if (req.method === 'GET') {
       const { data, error } = await db.selectRows('notifications', {}, 200);
-      if (error) return res.status(500).json({ error });
+      if (error) {
+        safeServerError(res, 'notifications:get', error);
+        return;
+      }
       return res.status(200).json({ notifications: data });
     }
 
@@ -98,7 +102,10 @@ export function createNotificationsHandler(dbFactory: () => DbAdapter = createSu
         delivery_status: dispatched.deliveryStatus,
         provider_response: dispatched.providerResponse,
       });
-      if (error) return res.status(500).json({ error });
+      if (error) {
+        safeServerError(res, 'notifications:post', error);
+        return;
+      }
       await recordAuditLog(db, actor!, 'dispatch_notification', 'notification', data?.id ?? null, {
         status: dispatched.deliveryStatus,
       });

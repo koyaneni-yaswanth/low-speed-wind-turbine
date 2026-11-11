@@ -29,7 +29,10 @@ export default async function handler(_req: ServerRequest, res: ServerResponse) 
     message: configured
       ? dbReachable
         ? 'Backend connected cleanly.'
-        : `Supabase configured but schema check returned: ${dbError}`
+        : 'Supabase is configured, but the database schema verification query failed (check server logs & migrations).'
       : 'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not configured on this server.',
   });
+  if (dbError) {
+    console.error('[pawan-shakti][health]', dbError);
+  }
 }

@@ -8,6 +8,7 @@ import {
   parseJsonBody,
   recordAuditLog,
   requirePermission,
+  safeServerError,
   type DbAdapter,
   type ServerRequest,
   type ServerResponse,
@@ -130,7 +131,7 @@ export function createInquiriesHandler(dbFactory: () => DbAdapter = createSupaba
       const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
       const refCode = `PS-${d.type === 'pilot_application' ? 'PILOT' : 'INQ'}-${datePart}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
 
-      await db.insertRow('website_inquiries', {
+      const { error: inqErr } = await db.insertRow('website_inquiries', {
         reference_code: refCode,
         inquiry_type: d.type,
         organization_name: d.organizationName,
@@ -141,6 +142,10 @@ export function createInquiriesHandler(dbFactory: () => DbAdapter = createSupaba
         message: d.additionalComments || '',
         consent_to_contact: d.consentToContact,
       });
+      if (inqErr) {
+        safeServerError(res, 'inquiries:insert_website_inquiry', inqErr);
+        return;
+      }
 
       const orgId =
         existingOrg?.id ||
@@ -167,7 +172,7 @@ export function createInquiriesHandler(dbFactory: () => DbAdapter = createSupaba
         null;
 
       if (d.type === 'pilot_application') {
-        const { data: assessment } = await db.insertRow('site_assessments', {
+        const { data: assessment, error: assErr } = await db.insertRow('site_assessments', {
           reference_code: refCode,
           organization_id: orgId,
           contact_id: contactId,
@@ -182,15 +187,23 @@ export function createInquiriesHandler(dbFactory: () => DbAdapter = createSupaba
           desired_timeline: d.desiredTimeline || null,
           additional_comments: d.additionalComments || null,
         });
+        if (assErr) {
+          safeServerError(res, 'inquiries:insert_assessment', assErr);
+          return;
+        }
 
-        const { data: pilotApp } = await db.insertRow('pilot_applications', {
+        const { data: pilotApp, error: pilotErr } = await db.insertRow('pilot_applications', {
           reference_code: refCode,
           assessment_id: assessment?.id || null,
           stage: 'New inquiry',
           owner_email: process.env.ADMIN_ALERT_EMAIL || 'koyaneniyaswanth@gmail.com',
         });
+        if (pilotErr) {
+          safeServerError(res, 'inquiries:insert_pilot_app', pilotErr);
+          return;
+        }
 
-        await db.insertRow('leads', {
+        const { error: leadErr } = await db.insertRow('leads', {
           organization_id: orgId,
           contact_id: contactId,
           pilot_application_id: pilotApp?.id || null,
@@ -202,6 +215,10 @@ export function createInquiriesHandler(dbFactory: () => DbAdapter = createSupaba
           next_action: 'Initial engineering review of site assessment',
           owner_email: process.env.ADMIN_ALERT_EMAIL || 'koyaneniyaswanth@gmail.com',
         });
+        if (leadErr) {
+          safeServerError(res, 'inquiries:insert_lead', leadErr);
+          return;
+        }
       }
 
       const safeContact = escapeHtml(d.contactName);
@@ -283,7 +300,11 @@ export function createInquiriesHandler(dbFactory: () => DbAdapter = createSupaba
       if (p.proposalValueInr !== undefined) patch.proposal_value_inr = p.proposalValueInr;
       if (p.currentEnergyCostInrKwh !== undefined) patch.current_energy_cost_inr_kwh = p.currentEnergyCostInrKwh;
 
-      const { data: updated } = await db.updateRows('leads', { id: p.leadId }, patch);
+      const { data: updated, error: patchErr } = await db.updateRows('leads', { id: p.leadId }, patch);
+      if (patchErr) {
+        safeServerError(res, 'inquiries:patch_lead', patchErr);
+        return;
+      }
 
       if (existingLead.pilot_application_id) {
         const appPatch: Record<string, unknown> = { updated_at: new Date().toISOString() };
