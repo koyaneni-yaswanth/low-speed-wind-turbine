@@ -40,11 +40,21 @@ export interface PrototypeRecord {
   status: string;
   evidenceTier: EvidenceTier;
   rotorLayout: string;
+  rotorDiameterM?: number | null;
+  sweptAreaM2: number | null;
+  bladeGeometry?: string;
+  gearArchitecture?: string;
+  gearRatio?: string;
+  generatorType?: string;
+  generatorRating?: string;
   frameMaterial: string;
   bladeMaterial: string;
+  bearingConfig?: string;
   transmission: string;
-  sweptAreaM2: number | null;
+  buildDate?: string;
+  modificationHistory?: string;
   photoUrl: string | null;
+  cadFiles?: string[];
   observedCutInMs: string;
   historicalPowerNote: string;
   keyFinding: string;
@@ -197,10 +207,13 @@ export interface BomItem {
 
 export interface ProjectTaskItem {
   id: string;
+  taskCode?: string;
+  workstream?: string;
   title: string;
   description: string;
   track: string;
   owner: string;
+  supportingMembers?: string[];
   priority: 'P0' | 'P1' | 'P2';
   offsetStartDay: number;
   durationDays: number;

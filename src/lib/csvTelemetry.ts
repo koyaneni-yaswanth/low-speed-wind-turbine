@@ -59,12 +59,13 @@ export function parseEsp32Csv(
   for (let lineIdx = 1; lineIdx < lines.length; lineIdx++) {
     const cols = lines[lineIdx].split(',').map((c) => c.trim());
     const ts = cols[iTs];
+    const tsMs = ts ? Date.parse(ts) : Number.NaN;
     const v = Number(cols[iV]);
     const curr = Number(cols[iI]);
     const wind = Number(cols[iWind]);
     const rpm = iRpm >= 0 ? Number(cols[iRpm]) : 0;
 
-    if (!ts || !Number.isFinite(v) || !Number.isFinite(curr) || !Number.isFinite(wind)) {
+    if (!ts || Number.isNaN(tsMs) || !Number.isFinite(v) || !Number.isFinite(curr) || !Number.isFinite(wind)) {
       errors.push(`Row ${lineIdx + 1}: invalid timestamp or numeric value.`);
       continue;
     }

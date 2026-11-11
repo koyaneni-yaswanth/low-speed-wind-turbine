@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Activity, AlertTriangle, Plus, Radio, ShieldCheck, Upload } from 'lucide-react';
 import { OPTION_COMPARISON_CRITERIA } from '../../data/pawanShaktiData.ts';
 import type {
@@ -11,14 +11,17 @@ import type {
 import { computePowerCurveBins, exportTelemetryToCsv, parseEsp32Csv } from '../../lib/csvTelemetry.ts';
 import { EvidenceBadge } from '../common/EvidenceBadge.tsx';
 
-export const EngineeringWorkbenchTab: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
+export const EngineeringWorkbenchTab: React.FC<{ canEdit: boolean; accessToken?: string | null }> = ({
+  canEdit,
+  accessToken,
+}) => {
   const [turbines, setTurbines] = useState<TurbineDevice[]>([
     {
       id: 't-m4',
       turbineId: 'PS-TRL4-MARK4-RIG',
       configurationName: 'Mark-4 4-Rotor Planar Planetary',
       prototypeVersion: 'Mark-4 (TRL 4)',
-      rotorArchitecture: '4 × 300 mm multi-blade impellers',
+      rotorArchitecture: '4 × 300 mm multi-blade impellers (S1223 derived)',
       transmissionType: '4-setup planetary + rear fan gear',
       gearRatio: '1:10 nominal',
       generatorDetails: 'Bench 24 V / 100 W PM DC (cogging under review)',
@@ -35,9 +38,14 @@ export const EngineeringWorkbenchTab: React.FC<{ canEdit: boolean }> = ({ canEdi
 
   const [newTurbineId, setNewTurbineId] = useState('');
   const [newTurbineArch, setNewTurbineArch] = useState('Option A — Coaxial Magnetic Gear (~1 m²)');
+  const [deviceUidInput, setDeviceUidInput] = useState('ESP32-PS-01');
+  const [samplingHzInput, setSamplingHzInput] = useState(1);
+  const [oneTimeKeyNotice, setOneTimeKeyNotice] = useState('');
   const [timeRange, setTimeRange] = useState<'Live' | '1h' | '24h' | '7d' | '30d' | 'Custom'>('Live');
   const [telemetry, setTelemetry] = useState<TelemetryReading[]>([]);
+  const [telemetrySource, setTelemetrySource] = useState<'none' | 'csv_upload' | 'live_hardware'>('none');
   const [csvNotice, setCsvNotice] = useState('');
+  const [syncNotice, setSyncNotice] = useState('');
 
   const [testRuns, setTestRuns] = useState<TestRunRecord[]>([
     {
@@ -65,14 +73,103 @@ export const EngineeringWorkbenchTab: React.FC<{ canEdit: boolean }> = ({ canEdi
   const [newRunObjective, setNewRunObjective] = useState('');
   const [comparisons, setComparisons] = useState<OptionComparisonCriterion[]>(OPTION_COMPARISON_CRITERIA);
 
-  const handleRegisterTurbine = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (!accessToken) return;
+    let active = true;
+    (async () => {
+      try {
+        const [telResp, admResp] = await Promise.all([
+          fetch('/api/telemetry', { headers: { Authorization: `Bearer ${accessToken}` } }),
+          fetch('/api/admin', { headers: { Authorization: `Bearer ${accessToken}` } }),
+        ]);
+        if (!active) return;
+        if (telResp.ok) {
+          const telData = await telResp.json();
+          if (Array.isArray(telData.telemetry) && telData.telemetry.length > 0) {
+            setTelemetry(telData.telemetry);
+            setTelemetrySource('live_hardware');
+          }
+          if (Array.isArray(telData.testRuns) && telData.testRuns.length > 0) {
+            setTestRuns(
+              telData.testRuns.map((r: any) => ({
+                id: r.id,
+                testId: r.test_code,
+                turbineId: r.turbine_id || 'PS-TRL4',
+                objective: r.objective,
+                configuration: r.configuration,
+                location: r.location,
+                startTime: r.start_time || '',
+                endTime: r.end_time || '',
+                sensorsUsed: r.sensors_used || '',
+                calibrationStatus: r.calibration_status || r.calibration_details || 'Uncalibrated',
+                operator: r.operator_name || 'Team',
+                weatherConditions: r.weather_conditions || '',
+                safetyChecklistCompleted: Boolean(r.safety_checklist_passed),
+                resultSummary: r.result_summary || '',
+                failureNotes: r.failure_notes || '',
+                reviewedBy: r.reviewed_by || 'Pending formal review',
+                state: r.state || 'draft',
+                evidenceTier: r.evidence_tier || 'PROTOTYPE_OBSERVATION',
+              }))
+            );
+          }
+          setSyncNotice('Synced with live Supabase engineering records.');
+        }
+        if (admResp.ok) {
+          const admData = await admResp.json();
+          if (Array.isArray(admData.optionComparisons) && admData.optionComparisons.length > 0) {
+            setComparisons(
+              admData.optionComparisons.map((c: any) => ({
+                id: c.id,
+                criterion: c.criterion,
+                optionANotes: c.option_a_notes,
+                optionBNotes: c.option_b_notes,
+                optionAScore: c.option_a_score,
+                optionBScore: c.option_b_score,
+                measurementBasis: c.measurement_basis,
+                evidenceTier: c.evidence_tier,
+              }))
+            );
+          }
+        }
+      } catch {
+        if (active) setSyncNotice('Cloud sync check unavailable offline.');
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [accessToken]);
+
+  const handleRegisterTurbine = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canEdit || !newTurbineId.trim()) return;
+    const code = newTurbineId.trim();
+    if (accessToken) {
+      const resp = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          action: 'upsert_turbine',
+          turbineCode: code,
+          prototypeVersion: 'TRL 4 Test Unit',
+          sweptAreaM2: 1.0,
+          gearArchitecture: newTurbineArch.includes('Option A') ? 'Coaxial Magnetic' : 'Planetary',
+          generatorRating: '300-500 W Coreless PMA candidate',
+        }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        setSyncNotice(`Save failed: ${err.error || resp.status}`);
+        return;
+      }
+      setSyncNotice(`Saved prototype ${code} to Supabase.`);
+    }
     setTurbines((prev) => [
       ...prev,
       {
         id: `t-${Date.now()}`,
-        turbineId: newTurbineId.trim(),
+        turbineId: code,
         configurationName: newTurbineArch,
         prototypeVersion: 'TRL 4 Test Unit',
         rotorArchitecture: newTurbineArch,
@@ -92,15 +189,65 @@ export const EngineeringWorkbenchTab: React.FC<{ canEdit: boolean }> = ({ canEdi
     setNewTurbineId('');
   };
 
-  const handleCreateTestRun = (e: React.FormEvent) => {
+  const handleRegisterDevice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canEdit || !deviceUidInput.trim()) return;
+    if (!accessToken) {
+      setOneTimeKeyNotice('Live Supabase Admin session required to mint persistent HMAC device credentials.');
+      return;
+    }
+    const resp = await fetch('/api/telemetry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({
+        action: 'register_device',
+        deviceUid: deviceUidInput.trim(),
+        samplingIntervalSec: Math.max(1, Math.round(1 / Math.max(0.01, samplingHzInput))),
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.status === 201 && data.oneTimeDeviceKey) {
+      setOneTimeKeyNotice(
+        `Registered ${data.device.deviceUid} (save HMAC key now — shown once): ${data.oneTimeDeviceKey}`
+      );
+    } else {
+      setOneTimeKeyNotice(data.error || `Device registration returned HTTP ${resp.status}`);
+    }
+  };
+
+  const handleCreateTestRun = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canEdit || !newRunObjective.trim()) return;
+    const objective = newRunObjective.trim();
+    const testId = `TR-${new Date().toISOString().slice(0, 10)}-${testRuns.length + 1}`;
+    if (accessToken) {
+      const resp = await fetch('/api/telemetry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          action: 'create_test_run',
+          testId,
+          objective,
+          configuration: 'Option A vs Option B Dyno Protocol',
+          location: 'VNIT Lab',
+          sensorsUsed: 'Anemometer, Hall RPM, INA226 Shunt, Temp, ADXL345',
+          calibrationStatus: 'Calibrated bench load required',
+          safetyChecklistCompleted: true,
+        }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        setSyncNotice(`Test run save failed: ${err.error || resp.status}`);
+        return;
+      }
+      setSyncNotice(`Created persisted test run ${testId}.`);
+    }
     setTestRuns((prev) => [
       {
         id: `run-${Date.now()}`,
-        testId: `TR-${new Date().toISOString().slice(0, 10)}-${prev.length + 1}`,
+        testId,
         turbineId: turbines[0]?.turbineId || 'PS-TRL4-MARK4-RIG',
-        objective: newRunObjective.trim(),
+        objective,
         configuration: 'Option A vs Option B Dyno Protocol',
         location: 'VNIT Lab',
         startTime: new Date().toISOString(),
@@ -121,8 +268,25 @@ export const EngineeringWorkbenchTab: React.FC<{ canEdit: boolean }> = ({ canEdi
     setNewRunObjective('');
   };
 
-  const transitionRunState = (id: string, nextState: TestRunState) => {
+  const transitionRunState = async (id: string, nextState: TestRunState) => {
     if (!canEdit) return;
+    const current = testRuns.find((r) => r.id === id);
+    if (nextState === 'reviewed' && current?.state !== 'completed') {
+      setSyncNotice('Blocked: Test run must be in "completed" state before formal review approval.');
+      return;
+    }
+    if (accessToken) {
+      const resp = await fetch('/api/telemetry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ action: 'transition_test_run', id, nextState }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        setSyncNotice(`Transition rejected: ${err.error || resp.status}`);
+        return;
+      }
+    }
     setTestRuns((prev) => prev.map((r) => (r.id === id ? { ...r, state: nextState } : r)));
   };
 
@@ -132,17 +296,34 @@ export const EngineeringWorkbenchTab: React.FC<{ canEdit: boolean }> = ({ canEdi
     const text = await file.text();
     const parsed = parseEsp32Csv(text, { sweptAreaM2: 1.0, turbineId: turbines[0]?.turbineId });
     setTelemetry(parsed.rows);
+    setTelemetrySource(parsed.rows.length > 0 ? 'csv_upload' : 'none');
     setCsvNotice(
-      `Loaded ${parsed.rows.length} rows locally (${parsed.betzAnomalyCount} Betz limit anomalies flagged). Connect Supabase to persist cloud series.`
+      `Loaded ${parsed.rows.length} CSV rows locally (${parsed.betzAnomalyCount} Betz anomalies, ${parsed.errors.length} row errors).`
     );
   };
 
-  const updateScore = (id: string, side: 'A' | 'B', val: string) => {
+  const updateScore = async (id: string, side: 'A' | 'B', val: string) => {
     if (!canEdit) return;
     const num = val === '' ? null : Math.max(1, Math.min(5, Number(val)));
-    setComparisons((prev) =>
-      prev.map((c) => (c.id === id ? (side === 'A' ? { ...c, optionAScore: num } : { ...c, optionBScore: num }) : c))
+    const nextList = comparisons.map((c) =>
+      c.id === id ? (side === 'A' ? { ...c, optionAScore: num } : { ...c, optionBScore: num }) : c
     );
+    setComparisons(nextList);
+    if (accessToken) {
+      const row = nextList.find((x) => x.id === id);
+      if (row) {
+        await fetch('/api/admin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify({
+            action: 'score_option_comparison',
+            id,
+            optionAScore: row.optionAScore,
+            optionBScore: row.optionBScore,
+          }),
+        }).catch(() => {});
+      }
+    }
   };
 
   const bins = useMemo(() => computePowerCurveBins(telemetry, 1.0), [telemetry]);
@@ -157,11 +338,19 @@ export const EngineeringWorkbenchTab: React.FC<{ canEdit: boolean }> = ({ canEdi
             <Radio className="h-5 w-5 text-amber-700 mt-0.5" />
             <div>
               <h2 className="font-display text-lg font-bold text-[#141A18]">
-                Engineering Telemetry Overview — No live telemetry connected
+                Engineering Telemetry Overview —{' '}
+                {telemetrySource === 'live_hardware'
+                  ? 'Live Hardware Stream Active'
+                  : telemetrySource === 'csv_upload'
+                  ? 'Uploaded CSV Data (Not Live Hardware)'
+                  : 'No live telemetry connected'}
               </h2>
               <p className="text-xs text-[#434E4A]">
-                0 live hardware devices streaming. Monitoring-only architecture: zero remote turbine actuation or brake override commands exist.
+                {telemetrySource === 'live_hardware'
+                  ? 'Verified HMAC-SHA256 ESP32/STM32 feed persisted.'
+                  : '0 live hardware devices streaming. Monitoring-only architecture: zero remote turbine actuation or brake override commands exist.'}
               </p>
+              {syncNotice && <p className="mt-1 font-mono text-[11px] text-[#0B2B22]">{syncNotice}</p>}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
@@ -281,6 +470,35 @@ export const EngineeringWorkbenchTab: React.FC<{ canEdit: boolean }> = ({ canEdi
               <button type="submit" className="rounded-lg bg-[#0B2B22] px-3 py-1.5 text-xs font-semibold text-white">
                 <Plus className="inline h-3.5 w-3.5" /> Add
               </button>
+            </form>
+          )}
+          {canEdit && (
+            <form onSubmit={handleRegisterDevice} className="rounded-xl border border-[#DDE2DC] bg-[#F6F7F4] p-3 space-y-2 text-xs">
+              <div className="font-semibold text-[#141A18]">Register ESP32 / STM32 Device (HMAC-SHA256)</div>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  type="text"
+                  value={deviceUidInput}
+                  onChange={(e) => setDeviceUidInput(e.target.value)}
+                  placeholder="Device UID (e.g. ESP32-PS-01)"
+                  aria-label="Hardware device UID"
+                  className="flex-1 rounded-lg border border-[#DDE2DC] bg-white px-2.5 py-1 font-mono"
+                />
+                <input
+                  type="number"
+                  step="0.5"
+                  min={0.1}
+                  max={10}
+                  value={samplingHzInput}
+                  onChange={(e) => setSamplingHzInput(Number(e.target.value) || 1)}
+                  aria-label="Sampling rate Hz"
+                  className="w-20 rounded-lg border border-[#DDE2DC] bg-white px-2 py-1 font-mono"
+                />
+                <button type="submit" className="rounded-lg border border-[#0B2B22] bg-white px-3 py-1 font-semibold text-[#0B2B22]">
+                  Mint Key
+                </button>
+              </div>
+              {oneTimeKeyNotice && <div className="font-mono text-[11px] text-amber-900 break-all">{oneTimeKeyNotice}</div>}
             </form>
           )}
           <div className="space-y-2 text-xs">

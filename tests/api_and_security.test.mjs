@@ -39,6 +39,7 @@ function createInMemoryDb(actorMap = {}, deviceMap = {}) {
     devices: Object.values(deviceMap),
     turbines: [],
     test_runs: [],
+    device_errors: [],
     tasks: [],
     option_comparisons: [],
     patents: [],
@@ -344,21 +345,111 @@ test('Telemetry Ingestion HMAC Security & Admin Isolation: verifies HMAC signatu
   assert.equal(founderFin.payload.bomItems.length, 1);
 });
 
-test('Database Schema & RLS Completeness: all required 34 tables exist and enforce row level security', () => {
-  const sql = fs.readFileSync(path.join(process.cwd(), 'supabase/migrations/001_pawan_shakti_platform.sql'), 'utf-8');
+test('Database Schema & RLS Completeness: all 36 tables enable RLS, full policy coverage, and fail-closed default role', () => {
+  const sql1 = fs.readFileSync(path.join(process.cwd(), 'supabase/migrations/001_pawan_shakti_platform.sql'), 'utf-8');
+  const sql2 = fs.readFileSync(path.join(process.cwd(), 'supabase/migrations/002_pawan_shakti_hardening_and_completeness.sql'), 'utf-8');
+  const combinedSql = `${sql1}\n${sql2}`;
+
   const requiredTables = [
     'profiles', 'roles', 'organizations', 'contacts', 'leads', 'lead_activities',
     'site_assessments', 'pilot_applications', 'pilot_projects', 'turbines',
     'turbine_configurations', 'option_comparisons', 'devices', 'sensors', 'telemetry',
-    'test_runs', 'test_measurements', 'maintenance_events', 'faults',
+    'device_errors', 'test_runs', 'test_measurements', 'maintenance_events', 'faults',
     'product_documents', 'publications', 'patents', 'tasks', 'milestones',
     'vendors', 'bom_items', 'quotations', 'financial_scenarios', 'grants',
     'grant_applications', 'monthly_reports', 'website_inquiries', 'notifications',
     'audit_logs', 'analytics_events',
   ];
   for (const tbl of requiredTables) {
-    assert.ok(sql.includes(`create table if not exists public.${tbl}`), `Missing SQL table: ${tbl}`);
-    assert.ok(sql.includes(`alter table public.${tbl} enable row level security`), `Missing RLS enable on: ${tbl}`);
+    assert.ok(combinedSql.includes(`create table if not exists public.${tbl}`), `Missing SQL table: ${tbl}`);
+    assert.ok(combinedSql.includes(`alter table public.${tbl} enable row level security`), `Missing RLS enable on: ${tbl}`);
+    assert.ok(combinedSql.includes(`on public.${tbl}`), `Missing RLS policy on: ${tbl}`);
   }
+  assert.ok(sql2.includes('prevent_profile_role_escalation'));
+  assert.ok(sql2.includes('handle_new_auth_user'));
+
+  // Verify fail-closed default profile role in both backend & frontend
+  const dbTs = fs.readFileSync(path.join(process.cwd(), 'api/_lib/db.ts'), 'utf-8');
+  assert.ok(dbTs.includes("|| 'public_visitor'"), 'Server must fail closed to public_visitor when profile row missing');
+  const adminPageTs = fs.readFileSync(path.join(process.cwd(), 'src/pages/AdminPortalPage.tsx'), 'utf-8');
+  assert.ok(!adminPageTs.includes("|| 'team_member'"), 'Frontend must fail closed to public_visitor when profile row missing');
+});
+
+test('Security Hardening: rejects malformed JSON (400), duplicate pilot (409), PII analytics (400), revoked devices & premature run review', async () => {
+  const actors = {
+    'tok-eng': { userId: 'u-eng', email: 'eng@pawanshakti.local', role: 'engineering_admin' },
+    'tok-reviewer': { userId: 'u-rev', email: 'rev@v3f.local', role: 'external_reviewer' },
+  };
+  const devices = {};
+  const { tables, adapter } = createInMemoryDb(actors, devices);
+  const inqHandler = createInquiriesHandler(() => adapter);
+  const telHandler = createTelemetryHandler(() => adapter);
+  const admHandler = createAdminHandler(() => adapter);
+  const anaHandler = createAnalyticsHandler(() => adapter);
+
+  // Malformed JSON -> 400 cleanly (never 500)
+  const badJsonRes = createMockRes();
+  await inqHandler({ method: 'POST', headers: { 'x-forwarded-for': '10.0.0.1' }, body: '{bad-json' }, badJsonRes);
+  assert.equal(badJsonRes.statusCode, 400);
+
+  // Duplicate Pilot Submission protection -> 201 then 409
+  const pilotPayload = {
+    type: 'pilot_application',
+    organizationName: 'Campus Test Org',
+    contactName: '<script>alert(1)</script>',
+    email: 'dup@example.org',
+    siteLocation: 'Nagpur Campus Roof',
+    applicationType: 'Institutional Campuses',
+    roofOrLandType: 'Concrete roof',
+    consentToContact: true,
+  };
+  const firstRes = createMockRes();
+  await inqHandler({ method: 'POST', headers: { 'x-forwarded-for': '10.0.0.2' }, body: pilotPayload }, firstRes);
+  assert.equal(firstRes.statusCode, 201);
+  assert.equal(tables.notifications[0].delivery_status, 'queued_provider_unconfigured');
+
+  const dupRes = createMockRes();
+  await inqHandler({ method: 'POST', headers: { 'x-forwarded-for': '10.0.0.2' }, body: pilotPayload }, dupRes);
+  assert.equal(dupRes.statusCode, 409);
+
+  // Analytics rejects PII keys in meta
+  const piiAnaRes = createMockRes();
+  await anaHandler(
+    { method: 'POST', headers: {}, body: { event: 'pilot_form_submit', path: '/pilot', meta: { email: 'leak@example.com' } } },
+    piiAnaRes
+  );
+  assert.equal(piiAnaRes.statusCode, 400);
+
+  // External reviewer gets ONLY public docs, never private agreements
+  const revDocsRes = createMockRes();
+  await admHandler({ method: 'GET', headers: { authorization: 'Bearer tok-reviewer' }, query: { action: 'grants_dataroom' } }, revDocsRes);
+  assert.equal(revDocsRes.statusCode, 200);
+  assert.equal(revDocsRes.payload.documents.length, 1);
+  assert.equal(revDocsRes.payload.documents[0].visibility, 'public');
+
+  // Test run cannot jump draft -> reviewed; requires completed first
+  const runCreateRes = createMockRes();
+  await telHandler(
+    { method: 'POST', headers: { authorization: 'Bearer tok-eng' }, body: { action: 'create_test_run', testId: 'TR-900', objective: 'Dyno run' } },
+    runCreateRes
+  );
+  assert.equal(runCreateRes.statusCode, 201);
+  const runId = runCreateRes.payload.testRun.id;
+
+  const skipReviewRes = createMockRes();
+  await telHandler(
+    { method: 'POST', headers: { authorization: 'Bearer tok-eng' }, body: { action: 'transition_test_run', id: runId, nextState: 'reviewed' } },
+    skipReviewRes
+  );
+  assert.equal(skipReviewRes.statusCode, 400);
+
+  // Register device -> one-time key returned -> revoke device blocks access
+  const regDevRes = createMockRes();
+  await telHandler(
+    { method: 'POST', headers: { authorization: 'Bearer tok-eng' }, body: { action: 'register_device', deviceUid: 'ESP32-PS-99', samplingIntervalSec: 1 } },
+    regDevRes
+  );
+  assert.equal(regDevRes.statusCode, 201);
+  assert.match(regDevRes.payload.oneTimeDeviceKey, /^ps_dev_/);
 });
 

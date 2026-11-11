@@ -23,7 +23,7 @@ const pilotFormSchema = z.object({
   desiredTimeline: z.string().trim().min(2),
   additionalComments: z.string().trim().optional(),
   consentToContact: z.literal(true, {
-    errorMap: () => ({ message: 'Explicit permission to contact is required before submitting.' }),
+    message: 'Explicit permission to contact is required before submitting.',
   }),
 });
 

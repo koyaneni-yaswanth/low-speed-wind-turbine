@@ -15,6 +15,7 @@ export const AdminPortalPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
   const [authenticatedRole, setAuthenticatedRole] = useState<UserRole>('public_visitor');
   const [localPreviewMode, setLocalPreviewMode] = useState(false);
   const [previewRole, setPreviewRole] = useState<UserRole>('founder_super_admin');
@@ -36,17 +37,32 @@ export const AdminPortalPage: React.FC = () => {
 
     const client = getSupabaseClient();
     if (!client) return;
-    client.auth.getSession().then(async ({ data }) => {
-      if (data.session?.user?.email) {
-        setUserEmail(data.session.user.email);
+
+    const syncSession = async (session: { access_token: string; user?: { id: string; email?: string } } | null) => {
+      if (session?.user?.email) {
+        setUserEmail(session.user.email);
+        setAccessToken(session.access_token);
         const { data: profile } = await client
           .from('profiles')
           .select('role')
-          .eq('id', data.session.user.id)
+          .eq('id', session.user.id)
           .maybeSingle();
-        setAuthenticatedRole((profile?.role as UserRole) || 'team_member');
+        // Fail closed to least-privilege public_visitor when profile row is absent
+        setAuthenticatedRole((profile?.role as UserRole) || 'public_visitor');
+      } else {
+        setUserEmail(null);
+        setAccessToken(null);
+        setAuthenticatedRole('public_visitor');
       }
+    };
+
+    client.auth.getSession().then(({ data }) => syncSession(data.session));
+    const { data: listener } = client.auth.onAuthStateChange((_evt, session) => {
+      syncSession(session);
     });
+    return () => {
+      listener?.subscription.unsubscribe();
+    };
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -65,9 +81,10 @@ export const AdminPortalPage: React.FC = () => {
       return;
     }
     setUserEmail(data.user?.email || null);
+    setAccessToken(data.session?.access_token || null);
     if (data.user?.id) {
       const { data: profile } = await client.from('profiles').select('role').eq('id', data.user.id).maybeSingle();
-      setAuthenticatedRole((profile?.role as UserRole) || 'team_member');
+      setAuthenticatedRole((profile?.role as UserRole) || 'public_visitor');
     }
   };
 
@@ -75,6 +92,7 @@ export const AdminPortalPage: React.FC = () => {
     const client = getSupabaseClient();
     if (client) await client.auth.signOut();
     setUserEmail(null);
+    setAccessToken(null);
     setAuthenticatedRole('public_visitor');
     setLocalPreviewMode(false);
   };
@@ -214,22 +232,28 @@ export const AdminPortalPage: React.FC = () => {
           {activeTab === 'engineering' && (
             <EngineeringWorkbenchTab
               canEdit={userEmail ? hasPermission(effectiveRole, 'edit_engineering_records') : false}
+              accessToken={accessToken}
             />
           )}
           {activeTab === 'crm' && (
             <CrmPipelineTab
               canView={hasPermission(effectiveRole, 'view_crm')}
               canEdit={userEmail ? hasPermission(effectiveRole, 'edit_crm') : false}
+              accessToken={accessToken}
             />
           )}
           {activeTab === 'founder_os' && (
-            <FounderOperatingTab canViewFinancials={hasPermission(effectiveRole, 'view_financials_bom')} />
+            <FounderOperatingTab
+              canViewFinancials={hasPermission(effectiveRole, 'view_financials_bom')}
+              accessToken={accessToken}
+            />
           )}
           {activeTab === 'grants_dataroom' && (
             <GrantsDataRoomTab
               canViewDataRoom={hasPermission(effectiveRole, 'view_grants_dataroom')}
               canManageCms={userEmail ? hasPermission(effectiveRole, 'manage_cms_and_roles') : false}
               canViewAudit={hasPermission(effectiveRole, 'view_audit_logs')}
+              accessToken={accessToken}
             />
           )}
         </>

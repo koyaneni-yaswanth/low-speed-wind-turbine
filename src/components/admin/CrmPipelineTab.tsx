@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { CrmLeadRecord, PipelineStage } from '../../types/index.ts';
 
 const ALL_STAGES: PipelineStage[] = [
@@ -21,7 +21,11 @@ const ALL_STAGES: PipelineStage[] = [
   'On hold',
 ];
 
-export const CrmPipelineTab: React.FC<{ canView: boolean; canEdit: boolean }> = ({ canView, canEdit }) => {
+export const CrmPipelineTab: React.FC<{ canView: boolean; canEdit: boolean; accessToken?: string | null }> = ({
+  canView,
+  canEdit,
+  accessToken,
+}) => {
   // Strictly starts at 0 verified leads / 0 surveys / 0 LOIs until real CRM records are added or fetched from DB
   const [leads, setLeads] = useState<CrmLeadRecord[]>([]);
   const [newOrg, setNewOrg] = useState('');
@@ -29,6 +33,62 @@ export const CrmPipelineTab: React.FC<{ canView: boolean; canEdit: boolean }> = 
   const [newEmail, setNewEmail] = useState('');
   const [newSegment, setNewSegment] = useState('Telecom Infrastructure');
   const [statusNotice, setStatusNotice] = useState('0 verified CRM leads loaded locally. Never displays synthetic interview or LOI metrics.');
+
+  useEffect(() => {
+    if (!canView || !accessToken) return;
+    let active = true;
+    (async () => {
+      try {
+        const resp = await fetch('/api/inquiries', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (!active || !resp.ok) return;
+        const data = await resp.json();
+        const orgMap = new Map((data.organizations || []).map((o: any) => [o.id, o]));
+        const contactMap = new Map((data.contacts || []).map((c: any) => [c.id, c]));
+        const loaded: CrmLeadRecord[] = (data.leads || []).map((l: any) => {
+          const org: any = orgMap.get(l.organization_id);
+          const contact: any = contactMap.get(l.contact_id);
+          return {
+            id: l.id,
+            referenceCode: l.pilot_application_id || String(l.id).slice(0, 8),
+            createdAt: l.created_at,
+            updatedAt: l.updated_at,
+            stage: l.stage || 'New inquiry',
+            owner: l.owner_email || 'Koyaneni Yaswanth',
+            customerSegment: l.customer_segment || 'General',
+            organizationName: org?.name || 'Organization',
+            contactName: contact?.full_name || 'Contact',
+            email: contact?.email || '',
+            siteLocation: org?.city || 'TBD',
+            applicationType: l.customer_segment || 'General',
+            roofOrLandType: 'TBD',
+            hasExistingSolar: false,
+            hasExistingBatteryOrInverter: false,
+            desiredTimeline: 'TBD',
+            consentToContact: Boolean(contact?.consent_to_contact ?? true),
+            discoveryNotes: '',
+            painPoints: l.pain_points || '',
+            currentEnergyCostInrKwh: l.current_energy_cost_inr_kwh ?? null,
+            followUpDate: l.follow_up_date || null,
+            nextAction: l.next_action || '',
+            surveyScheduledAt: null,
+            proposalRef: null,
+            loiRef: null,
+            linkedTurbineId: null,
+            notificationStatus: 'queued_provider_unconfigured',
+          };
+        });
+        setLeads(loaded);
+        setStatusNotice(`Loaded ${loaded.length} verified CRM leads from Supabase.`);
+      } catch {
+        if (active) setStatusNotice('Unable to reach /api/inquiries in current environment.');
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [canView, accessToken]);
 
   if (!canView) {
     return (
@@ -42,6 +102,29 @@ export const CrmPipelineTab: React.FC<{ canView: boolean; canEdit: boolean }> = 
   const handleAddVerifiedRecord = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canEdit || !newOrg.trim() || !newContact.trim() || !newEmail.trim()) return;
+
+    if (accessToken) {
+      const resp = await fetch('/api/inquiries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          type: 'pilot_application',
+          organizationName: newOrg.trim(),
+          contactName: newContact.trim(),
+          email: newEmail.trim(),
+          siteLocation: 'Discovery Logged',
+          applicationType: newSegment,
+          roofOrLandType: 'Pending Survey',
+          consentToContact: true,
+        }),
+      });
+      const resJson = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setStatusNotice(resJson.error || `Failed to save lead (HTTP ${resp.status}).`);
+        return;
+      }
+      setStatusNotice(`Saved real CRM lead under ${resJson.referenceCode}.`);
+    }
 
     const record: CrmLeadRecord = {
       id: `crm-${Date.now()}`,
@@ -76,39 +159,47 @@ export const CrmPipelineTab: React.FC<{ canView: boolean; canEdit: boolean }> = 
     setNewOrg('');
     setNewContact('');
     setNewEmail('');
-    setStatusNotice(`Added lead ${record.referenceCode} in session state (requires authenticated Supabase sync for persistence).`);
   };
 
-  const updateStage = (id: string, nextStage: PipelineStage) => {
+  const updateStage = async (id: string, nextStage: PipelineStage) => {
     if (!canEdit) return;
+    if (accessToken) {
+      await fetch('/api/inquiries', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ leadId: id, toStage: nextStage }),
+      }).catch(() => {});
+    }
     setLeads((prev) =>
       prev.map((l) => (l.id === id ? { ...l, stage: nextStage, updatedAt: new Date().toISOString() } : l))
     );
   };
 
+  const interviewCount = leads.filter((l) => l.stage !== 'New inquiry' && l.stage !== 'Qualified').length;
   const surveyCount = leads.filter((l) => l.stage.includes('survey')).length;
+  const proposalCount = leads.filter((l) => l.stage.includes('Proposal')).length;
   const loiSignedCount = leads.filter((l) => l.stage === 'LOI signed').length;
+  const activePilotsCount = leads.filter((l) => l.stage === 'Pilot active' || l.stage === 'Pilot installed').length;
   const wonCount = leads.filter((l) => l.stage === 'Won').length;
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
-        <div className="rounded-xl border border-[#DDE2DC] bg-white p-4">
-          <div className="text-[#434E4A]">Verified Discovery / Leads</div>
-          <div className="mt-1 font-mono text-2xl font-bold text-[#141A18]">{leads.length}</div>
-        </div>
-        <div className="rounded-xl border border-[#DDE2DC] bg-white p-4">
-          <div className="text-[#434E4A]">Site Surveys</div>
-          <div className="mt-1 font-mono text-2xl font-bold text-[#141A18]">{surveyCount}</div>
-        </div>
-        <div className="rounded-xl border border-[#DDE2DC] bg-white p-4">
-          <div className="text-[#434E4A]">LOIs Signed</div>
-          <div className="mt-1 font-mono text-2xl font-bold text-[#141A18]">{loiSignedCount}</div>
-        </div>
-        <div className="rounded-xl border border-[#DDE2DC] bg-white p-4">
-          <div className="text-[#434E4A]">Commercial Orders Won</div>
-          <div className="mt-1 font-mono text-2xl font-bold text-[#141A18]">{wonCount}</div>
-        </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8 text-xs">
+        {[
+          ['Prospects', String(leads.length)],
+          ['Interviews', String(interviewCount)],
+          ['Site Surveys', String(surveyCount)],
+          ['Proposals', String(proposalCount)],
+          ['LOIs Signed', String(loiSignedCount)],
+          ['Active Pilots', String(activePilotsCount)],
+          ['Orders Won', String(wonCount)],
+          ['Revenue', '₹0'],
+        ].map(([label, val]) => (
+          <div key={label} className="rounded-xl border border-[#DDE2DC] bg-white p-3">
+            <div className="text-[#434E4A]">{label}</div>
+            <div className="mt-1 font-mono text-lg font-bold text-[#141A18]">{val}</div>
+          </div>
+        ))}
       </div>
 
       <div className="rounded-2xl border border-[#DDE2DC] bg-white p-5 space-y-4">

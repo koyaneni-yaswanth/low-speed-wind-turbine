@@ -1,7 +1,11 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import {
+  checkRateLimit,
   createSupabaseDbAdapter,
+  escapeHtml,
+  getClientIp,
+  parseJsonBody,
   recordAuditLog,
   requirePermission,
   type DbAdapter,
@@ -51,12 +55,16 @@ const submissionSchema = z.object({
 });
 
 const patchLeadSchema = z.object({
-  leadId: z.string().trim().min(4),
+  leadId: z.string().trim().min(2),
   toStage: z.string().trim().optional(),
   notes: z.string().trim().max(1500).optional(),
   painPoints: z.string().trim().max(500).optional(),
   nextAction: z.string().trim().max(300).optional(),
   followUpDate: z.string().trim().optional(),
+  discoveryDate: z.string().trim().optional(),
+  existingEnergySetup: z.string().trim().max(400).optional(),
+  siteConditions: z.string().trim().max(400).optional(),
+  proposalValueInr: z.number().nonnegative().optional(),
   currentEnergyCostInrKwh: z.number().nonnegative().optional(),
   surveyScheduledAt: z.string().trim().optional(),
   proposalRef: z.string().trim().max(120).optional(),
@@ -74,9 +82,17 @@ export function createInquiriesHandler(dbFactory: () => DbAdapter = createSupaba
     }
 
     if (req.method === 'POST') {
-      const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body) || {};
+      const rate = checkRateLimit(`inq:${getClientIp(req)}`, 20, 60_000);
+      if (!rate.allowed) {
+        return res.status(429).json({ error: `Rate limit exceeded. Retry in ${rate.retryAfterSec}s.` });
+      }
+
+      const bodyParse = parseJsonBody(req);
+      if (!bodyParse.ok) {
+        return res.status(400).json({ error: bodyParse.error });
+      }
+      const body = bodyParse.data;
       if (typeof body.honeypot === 'string' && body.honeypot.trim().length > 0) {
-        // Spam trap: reject silently or return 400
         return res.status(400).json({ error: 'Spam check triggered.' });
       }
 
@@ -89,9 +105,27 @@ export function createInquiriesHandler(dbFactory: () => DbAdapter = createSupaba
       }
 
       const d = parsed.data;
-      // Duplicate protection check for active email+org inquiry within recent leads
-      const { data: existingContacts } = await db.selectRows('contacts', { email: d.email }, 10);
-      const isDuplicateEmail = existingContacts.length > 0;
+      const [{ data: existingContacts }, { data: existingOrgs }, { data: existingAssessments }] = await Promise.all([
+        db.selectRows('contacts', { email: d.email }, 5),
+        db.selectRows('organizations', { name: d.organizationName }, 5),
+        d.type === 'pilot_application' ? db.selectRows('site_assessments', { site_location: d.siteLocation }, 10) : Promise.resolve({ data: [] }),
+      ]);
+
+      const existingContact = existingContacts[0] || null;
+      const existingOrg = existingOrgs[0] || null;
+      const isDuplicateEmail = Boolean(existingContact);
+
+      if (
+        d.type === 'pilot_application' &&
+        existingContact &&
+        existingAssessments.some((a: any) => a.contact_id === existingContact.id && a.application_type === d.applicationType)
+      ) {
+        const matched = existingAssessments.find((a: any) => a.contact_id === existingContact.id && a.application_type === d.applicationType);
+        return res.status(409).json({
+          error: 'Duplicate pilot submission detected for this email and site.',
+          existingReferenceCode: matched?.reference_code || null,
+        });
+      }
 
       const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
       const refCode = `PS-${d.type === 'pilot_application' ? 'PILOT' : 'INQ'}-${datePart}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
@@ -108,25 +142,35 @@ export function createInquiriesHandler(dbFactory: () => DbAdapter = createSupaba
         consent_to_contact: d.consentToContact,
       });
 
-      const { data: org } = await db.insertRow('organizations', {
-        name: d.organizationName,
-        segment: d.applicationType,
-        city: d.siteLocation,
-      });
+      const orgId =
+        existingOrg?.id ||
+        (
+          await db.insertRow('organizations', {
+            name: d.organizationName,
+            segment: d.applicationType,
+            city: d.siteLocation,
+          })
+        ).data?.id ||
+        null;
 
-      const { data: contact } = await db.insertRow('contacts', {
-        organization_id: org?.id || null,
-        full_name: d.contactName,
-        email: d.email,
-        phone: d.phone || null,
-        consent_to_contact: d.consentToContact,
-      });
+      const contactId =
+        existingContact?.id ||
+        (
+          await db.insertRow('contacts', {
+            organization_id: orgId,
+            full_name: d.contactName,
+            email: d.email,
+            phone: d.phone || null,
+            consent_to_contact: d.consentToContact,
+          })
+        ).data?.id ||
+        null;
 
       if (d.type === 'pilot_application') {
         const { data: assessment } = await db.insertRow('site_assessments', {
           reference_code: refCode,
-          organization_id: org?.id || null,
-          contact_id: contact?.id || null,
+          organization_id: orgId,
+          contact_id: contactId,
           site_location: d.siteLocation,
           application_type: d.applicationType,
           roof_or_land_type: d.roofOrLandType,
@@ -147,21 +191,25 @@ export function createInquiriesHandler(dbFactory: () => DbAdapter = createSupaba
         });
 
         await db.insertRow('leads', {
-          organization_id: org?.id || null,
-          contact_id: contact?.id || null,
+          organization_id: orgId,
+          contact_id: contactId,
           pilot_application_id: pilotApp?.id || null,
           customer_segment: d.applicationType,
           estimated_demand_kwh_day: d.energyRequirementKwhDay ?? null,
+          existing_energy_setup: d.hasExistingSolar ? 'Solar PV present' : d.hasExistingBatteryOrInverter ? 'Battery/Inverter present' : 'None noted',
+          site_conditions: d.approximateWindInfo || d.roofOrLandType,
           stage: 'New inquiry',
           next_action: 'Initial engineering review of site assessment',
           owner_email: process.env.ADMIN_ALERT_EMAIL || 'koyaneniyaswanth@gmail.com',
         });
       }
 
+      const safeContact = escapeHtml(d.contactName);
+      const safeRef = escapeHtml(refCode);
       const emailRes = await dispatchEmailNotification({
         to: d.email,
         subject: `Pawan Shakti Inquiry Received (${refCode})`,
-        htmlBody: `<p>Thank you ${d.contactName}. Your reference code is <strong>${refCode}</strong>. Final site suitability awaits technical wind and mounting review.</p>`,
+        htmlBody: `<p>Thank you ${safeContact}. Your reference code is <strong>${safeRef}</strong>. Final site suitability awaits technical wind and mounting review.</p>`,
       });
 
       await db.insertRow('notifications', {
@@ -207,8 +255,9 @@ export function createInquiriesHandler(dbFactory: () => DbAdapter = createSupaba
       const auth = requirePermission(actor, 'edit_crm');
       if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
 
-      const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body) || {};
-      const parsed = patchLeadSchema.safeParse(body);
+      const bodyParse = parseJsonBody(req);
+      if (!bodyParse.ok) return res.status(400).json({ error: bodyParse.error });
+      const parsed = patchLeadSchema.safeParse(bodyParse.data);
       if (!parsed.success) {
         return res.status(400).json({ error: 'Invalid CRM lead update payload.' });
       }
@@ -228,6 +277,10 @@ export function createInquiriesHandler(dbFactory: () => DbAdapter = createSupaba
       if (p.painPoints !== undefined) patch.pain_points = p.painPoints;
       if (p.nextAction !== undefined) patch.next_action = p.nextAction;
       if (p.followUpDate !== undefined) patch.follow_up_date = p.followUpDate;
+      if (p.discoveryDate !== undefined) patch.discovery_date = p.discoveryDate;
+      if (p.existingEnergySetup !== undefined) patch.existing_energy_setup = p.existingEnergySetup;
+      if (p.siteConditions !== undefined) patch.site_conditions = p.siteConditions;
+      if (p.proposalValueInr !== undefined) patch.proposal_value_inr = p.proposalValueInr;
       if (p.currentEnergyCostInrKwh !== undefined) patch.current_energy_cost_inr_kwh = p.currentEnergyCostInrKwh;
 
       const { data: updated } = await db.updateRows('leads', { id: p.leadId }, patch);

@@ -18,7 +18,31 @@ export const ModelViewer3D: React.FC<Props> = ({ asset }) => {
   const [errorMsg, setErrorMsg] = useState('');
   const [dimensionsMm, setDimensionsMm] = useState<string>('');
   const materialRefs = useRef<THREE.MeshStandardMaterial[]>([]);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
   const wireframeRef = useRef(wireframe);
+
+  const handleZoom = (factor: number) => {
+    const cam = cameraRef.current;
+    const ctrl = controlsRef.current;
+    if (!cam || !ctrl) return;
+    const offset = cam.position.clone().sub(ctrl.target);
+    offset.multiplyScalar(factor);
+    const len = offset.length();
+    if (len < 30) offset.setLength(30);
+    if (len > 900) offset.setLength(900);
+    cam.position.copy(ctrl.target).add(offset);
+    ctrl.update();
+  };
+
+  const handleResetView = () => {
+    const cam = cameraRef.current;
+    const ctrl = controlsRef.current;
+    if (!cam || !ctrl) return;
+    cam.position.set(135, 95, 135);
+    ctrl.target.set(0, 0, 0);
+    ctrl.update();
+  };
 
   useEffect(() => {
     wireframeRef.current = wireframe;
@@ -68,9 +92,13 @@ export const ModelViewer3D: React.FC<Props> = ({ asset }) => {
 
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 5000);
     camera.position.set(140, 110, 140);
+    cameraRef.current = camera;
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
+    controls.enableZoom = true;
+    controls.enablePan = true;
+    controlsRef.current = controls;
 
     const hemi = new THREE.HemisphereLight(0xffffff, 0x3b4a44, 1.3);
     scene.add(hemi);
@@ -116,10 +144,26 @@ export const ModelViewer3D: React.FC<Props> = ({ asset }) => {
 
     const loadModel = async () => {
       try {
+        const resp = await fetch(asset.publicUrl!);
+        if (!resp.ok) {
+          throw new Error(`Failed to fetch CAD file (HTTP ${resp.status}).`);
+        }
+        const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+        if (contentType.includes('text/html')) {
+          throw new Error('Invalid CAD payload: server returned HTML instead of binary mesh.');
+        }
+        const buffer = await resp.arrayBuffer();
+        if (!mounted) return;
+        if (buffer.byteLength < 16) {
+          throw new Error('CAD file is empty or truncated.');
+        }
+
         if (asset.format === 'stl') {
           const loader = new STLLoader();
-          const geometry = await loader.loadAsync(asset.publicUrl!);
-          if (!mounted) return;
+          const geometry = loader.parse(buffer);
+          if (!geometry.attributes.position || geometry.attributes.position.count === 0) {
+            throw new Error('STL mesh contains zero geometry vertices.');
+          }
           geometry.computeVertexNormals();
           const mesh = new THREE.Mesh(geometry, defaultMaterial);
           scene.add(mesh);
@@ -127,8 +171,7 @@ export const ModelViewer3D: React.FC<Props> = ({ asset }) => {
           setStatus('ready');
         } else if (asset.format === '3mf') {
           const loader = new ThreeMFLoader();
-          const group = await loader.loadAsync(asset.publicUrl!);
-          if (!mounted) return;
+          const group = loader.parse(buffer);
           const mats: THREE.MeshStandardMaterial[] = [];
           group.traverse((child) => {
             if ((child as THREE.Mesh).isMesh) {
@@ -138,7 +181,10 @@ export const ModelViewer3D: React.FC<Props> = ({ asset }) => {
               mesh.material = m;
             }
           });
-          if (mats.length > 0) materialRefs.current = mats;
+          if (mats.length === 0) {
+            throw new Error('3MF archive contains zero renderable mesh objects.');
+          }
+          materialRefs.current = mats;
           scene.add(group);
           centerObject(group);
           setStatus('ready');
@@ -173,6 +219,8 @@ export const ModelViewer3D: React.FC<Props> = ({ asset }) => {
       mounted = false;
       cancelAnimationFrame(frameId);
       window.removeEventListener('resize', onResize);
+      cameraRef.current = null;
+      controlsRef.current = null;
       controls.dispose();
       renderer?.dispose();
     };
@@ -185,17 +233,43 @@ export const ModelViewer3D: React.FC<Props> = ({ asset }) => {
           <span className="font-mono font-semibold text-[#141A18]">{asset.name}</span>
           {dimensionsMm && <span className="ml-2 font-mono text-[11px] text-[#434E4A]">({dimensionsMm})</span>}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           {asset.viewerSupported && (
-            <button
-              type="button"
-              onClick={() => setWireframe(!wireframe)}
-              className={`rounded-md border px-2.5 py-1 text-[11px] font-medium ${
-                wireframe ? 'border-[#0B2B22] bg-[#0B2B22] text-white' : 'border-[#DDE2DC] bg-white text-[#141A18]'
-              }`}
-            >
-              {wireframe ? 'Solid Mesh' : 'Wireframe'}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => handleZoom(0.8)}
+                aria-label="Zoom in 3D CAD model"
+                className="rounded-md border border-[#DDE2DC] bg-white px-2 py-1 text-[11px] font-mono text-[#141A18] hover:bg-[#EDF0EB]"
+              >
+                +Zoom
+              </button>
+              <button
+                type="button"
+                onClick={() => handleZoom(1.25)}
+                aria-label="Zoom out 3D CAD model"
+                className="rounded-md border border-[#DDE2DC] bg-white px-2 py-1 text-[11px] font-mono text-[#141A18] hover:bg-[#EDF0EB]"
+              >
+                -Zoom
+              </button>
+              <button
+                type="button"
+                onClick={handleResetView}
+                aria-label="Reset 3D CAD camera"
+                className="rounded-md border border-[#DDE2DC] bg-white px-2 py-1 text-[11px] font-medium text-[#141A18] hover:bg-[#EDF0EB]"
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                onClick={() => setWireframe(!wireframe)}
+                className={`rounded-md border px-2.5 py-1 text-[11px] font-medium ${
+                  wireframe ? 'border-[#0B2B22] bg-[#0B2B22] text-white' : 'border-[#DDE2DC] bg-white text-[#141A18]'
+                }`}
+              >
+                {wireframe ? 'Solid Mesh' : 'Wireframe'}
+              </button>
+            </>
           )}
           {asset.publicUrl && (
             <a

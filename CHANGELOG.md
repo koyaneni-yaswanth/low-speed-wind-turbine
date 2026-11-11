@@ -4,6 +4,17 @@ All notable technical updates, hardware revisions, and architectural milestones 
 
 ---
 
+## [Platform V1.1 — Hardening, Full RLS, API Persistence & Edge-Case Verification] - 2026-11-11 (Branch `feature/pawan-shakti-platform`)
+
+### Added & Fixed
+- Resolved high-severity dependency advisory (`zod < 4.6.6`, `GHSA-mrhx-c7xc-m3w5`) by upgrading to `zod@^4.6.7` (`npm audit`: `0` vulnerabilities).
+- Added idempotent migration [`supabase/migrations/002_pawan_shakti_hardening_and_completeness.sql`](supabase/migrations/002_pawan_shakti_hardening_and_completeness.sql) establishing explicit RLS policies across all 36 tables, `device_errors` diagnostics, role-escalation prevention triggers, fail-closed `public_visitor` default signup trigger, and structural baseline seeds.
+- Hardened `api/_lib/db.ts`, `inquiries.ts`, `telemetry.ts`, `admin.ts`, `analytics.ts`, and `notifications.ts` with fail-closed `public_visitor` fallback, safe `parseJsonBody()`, `escapeHtml()` email escaping, sliding-window rate limiting (`429`), rapid duplicate pilot rejection (`409`), PII-free analytics enforcement, ESP32 device registration/revocation (`oneTimeDeviceKey`), and `draft -> running -> completed -> reviewed -> rejected` review gating.
+- Wired all 4 `/admin` tabs to live API endpoints when authenticated while preserving honest Offline Inspector mode, and added explicit Zoom In/Zoom Out/Reset controls plus binary mesh fetch validation to [`src/components/cad/ModelViewer3D.tsx`](src/components/cad/ModelViewer3D.tsx).
+- Expanded test coverage to `16 / 16` Node unit/physics/CSV/security/SQL assertions plus Playwright headless Chrome E2E verification (`1440x900`, `768x1024`, `375x812`).
+
+---
+
 ## [Platform V1 — Digital Platform & Engineering OS] - 2026-11-10 (Branch `feature/pawan-shakti-platform`)
 
 ### Added

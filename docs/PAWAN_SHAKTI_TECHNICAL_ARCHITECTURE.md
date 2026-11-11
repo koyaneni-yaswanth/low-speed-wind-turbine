@@ -81,7 +81,8 @@ Vercel Hobby allows up to 12 functions; we keep the API footprint compact with s
 
 ## 4. Database Architecture & Offline Integrity
 
-- **Relational Migration:** `supabase/migrations/001_pawan_shakti_platform.sql` creates all 34 relational tables with UUID primary keys, foreign keys, `created_at`/`updated_at`, `deleted_at` soft deletes, indexes, and strict RLS.
+- **Relational Migrations:** `supabase/migrations/001_pawan_shakti_platform.sql` + `supabase/migrations/002_pawan_shakti_hardening_and_completeness.sql` establish 36 relational tables (including `device_errors`), UUID primary keys, `updated_at` triggers, role-escalation guards, and strict RLS policies across every table.
+- **API Hardening Update (`11 Nov 2026`):** `api/_lib/db.ts` fails closed to `'public_visitor'`, provides safe `parseJsonBody()` (`400` on malformed JSON), `escapeHtml()` email sanitization, sliding-window rate limiting (`429`), device registration/revocation (`POST /api/telemetry`), and strict `draft -> running -> completed -> reviewed -> rejected` workflow checks.
 - **Honest Offline / Unconfigured Behavior:**
   - When `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` or server `SUPABASE_SERVICE_ROLE_KEY` are missing, public informational views, CAD/Airfoil viewers, and local physics/financial calculators work seamlessly with clear **[UNCONFIGURED CLOUD STORAGE — LOCAL READ-ONLY MODE]** notices.
   - Database write actions (Pilot submission, Telemetry upload, CRM edits, Auth) **never fake success** — they invoke real API endpoints which honestly return HTTP `503` diagnostic state until live Supabase credentials are configured.

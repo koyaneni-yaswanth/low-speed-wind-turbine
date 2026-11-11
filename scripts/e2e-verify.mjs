@@ -1,9 +1,12 @@
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { chromium } from 'playwright-core';
 
 const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const PREVIEW_URL = 'http://127.0.0.1:4174';
+const SCREENSHOT_DIR = 'C:\\Users\\recvn\\.gemini\\antigravity\\brain\\a2436169-70bb-4a55-b1b6-42f47d466078\\scratch\\e2e-screenshots';
 
 function wait(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -24,6 +27,7 @@ async function waitForServer(url, timeoutMs = 15000) {
 }
 
 async function runE2E() {
+  fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
   const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--port', '4174', '--host', '127.0.0.1', '--strictPort'], {
     stdio: 'ignore',
   });
@@ -41,7 +45,11 @@ async function runE2E() {
       const page = await context.newPage();
 
       const pageErrors = [];
+      const consoleErrors = [];
       page.on('pageerror', (err) => pageErrors.push(err.message));
+      page.on('console', (msg) => {
+        if (msg.type() === 'error') consoleErrors.push(msg.text());
+      });
 
       // 1. Check all 9 public routes + /admin on Desktop (1440x900)
       const routes = ['/', '/technology', '/products', '/applications', '/performance', '/pilot', '/about', '/resources', '/contact', '/admin'];
@@ -50,18 +58,22 @@ async function runE2E() {
         const bodyText = await page.locator('main').innerText();
         assert.ok(bodyText.trim().length > 80, `Route ${route} rendered empty content`);
 
-        // Assert zero broken images
         const brokenImgs = await page.evaluate(() =>
           Array.from(document.querySelectorAll('img')).filter((img) => !img.complete || img.naturalWidth === 0).map((i) => i.src)
         );
         assert.deepEqual(brokenImgs, [], `Broken images on ${route}: ${brokenImgs.join(', ')}`);
 
-        // Assert desktop horizontal overflow == 0
         const overflowDesktop = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
         assert.ok(overflowDesktop <= 2, `Horizontal overflow on desktop ${route}: ${overflowDesktop}px`);
       }
 
-      // 2. Verify Interactive Performance CSV Audit & Calculator Suite
+      // Desktop Home Screenshot
+      await page.goto(`${PREVIEW_URL}/`, { waitUntil: 'networkidle' });
+      const desktopShot = path.join(SCREENSHOT_DIR, 'desktop-1440-home.png');
+      await page.screenshot({ path: desktopShot, fullPage: true });
+      assert.ok(fs.statSync(desktopShot).size > 10000);
+
+      // 2. Verify Interactive Performance CSV Audit & Calculator Suite (+ Negative Validation)
       await page.goto(`${PREVIEW_URL}/performance`, { waitUntil: 'networkidle' });
       await page.getByRole('button', { name: 'Inspect Repo Sample CSV' }).click();
       await page.getByText(/Betz Anomalies Flagged:/).waitFor({ timeout: 5000 });
@@ -70,44 +82,70 @@ async function runE2E() {
       await page.getByRole('tab', { name: 'Solar-Wind Hybrid' }).click();
       await page.getByText('Illustrative 24-Hour Generation Profile Estimate').waitFor();
 
-      // 3. Verify Pilot Form validation & honest unconfigured handling
+      // 3. Verify Products Option A vs Option B filter & Resources Search
+      await page.goto(`${PREVIEW_URL}/products`, { waitUntil: 'networkidle' });
+      await page.getByLabel('Filter Option A vs Option B comparison criteria').fill('Starting torque');
+      await page.getByText('Starting torque').waitFor();
+      await page.goto(`${PREVIEW_URL}/resources`, { waitUntil: 'networkidle' });
+      await page.getByLabel('Search Pawan Shakti resource library').fill('Patent');
+      await page.getByRole('heading', { name: /Compact Wind Turbine with Planetary Gears/i }).waitFor();
+
+      // 4. Verify Pilot & Contact Form validation alerts
       await page.goto(`${PREVIEW_URL}/pilot`, { waitUntil: 'networkidle' });
       await page.getByRole('button', { name: 'Submit Pilot Site Assessment' }).click();
       await page.getByRole('alert').waitFor({ timeout: 5000 });
 
-      // 4. Verify Technology CAD Explorer & Airfoil plot
+      await page.goto(`${PREVIEW_URL}/contact`, { waitUntil: 'networkidle' });
+      await page.getByRole('button', { name: 'Send Technical Inquiry' }).click();
+      await page.getByRole('alert').waitFor({ timeout: 5000 });
+
+      // 5. Verify Technology CAD Explorer (Zoom, Reset, Wireframe) & Airfoil plot
       await page.goto(`${PREVIEW_URL}/technology`, { waitUntil: 'networkidle' });
       await page.locator('svg[aria-label="Selig S1223 airfoil cross-section plot"]').waitFor();
+      await page.getByLabel('Zoom in 3D CAD model').click();
+      await page.getByLabel('Reset 3D CAD camera').click();
       await page.getByRole('button', { name: /Wireframe|Solid Mesh/ }).click();
+      const cadShot = path.join(SCREENSHOT_DIR, 'desktop-1440-technology-cad.png');
+      await page.screenshot({ path: cadShot });
+      assert.ok(fs.statSync(cadShot).size > 10000);
 
-      // 5. Verify Admin RBAC least-privilege UI isolation
+      // 6. Verify Admin Workbench across all 4 tabs & least-privilege RBAC isolation
       await page.goto(`${PREVIEW_URL}/admin`, { waitUntil: 'networkidle' });
       await page.getByRole('button', { name: 'Inspect Offline UI & RBAC Views' }).click();
+      await page.getByLabel('Inspect RBAC visibility by role').selectOption('founder_super_admin');
+      await page.getByRole('tab', { name: 'Grants, Data Room & RBAC' }).click();
+      await page.getByText(/Least-Privilege RBAC Policy Matrix/).waitFor();
+
       await page.getByLabel('Inspect RBAC visibility by role').selectOption('team_member');
       await page.getByRole('tab', { name: 'CRM & Pilot Pipeline' }).click();
       await page.getByText(/Access Restricted: Your current role does not hold/i).waitFor();
       await page.getByRole('tab', { name: /KPIs, Monthly PDF/i }).click();
       await page.getByText(/Financial Scenarios & Unit BOM Economics are hidden/i).waitFor();
 
-      // 6. Verify Mobile Viewport (375x812) & Tablet (768x1024) responsiveness across key pages
+      // 7. Verify Tablet (768x1024) & Mobile (375x812) responsiveness + screenshots
       for (const vp of [
-        { width: 375, height: 812 },
-        { width: 768, height: 1024 },
+        { width: 768, height: 1024, label: 'tablet-768' },
+        { width: 375, height: 812, label: 'mobile-375' },
       ]) {
-        await page.setViewportSize(vp);
+        await page.setViewportSize({ width: vp.width, height: vp.height });
         for (const r of ['/', '/technology', '/performance', '/pilot', '/admin']) {
           await page.goto(`${PREVIEW_URL}${r}`, { waitUntil: 'networkidle' });
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           assert.ok(overflow <= 2, `Responsive overflow at ${vp.width}px on ${r}: ${overflow}px`);
         }
-        // Test mobile hamburger drawer opens cleanly
+        await page.goto(`${PREVIEW_URL}/`, { waitUntil: 'networkidle' });
+        const vpShot = path.join(SCREENSHOT_DIR, `${vp.label}-home.png`);
+        await page.screenshot({ path: vpShot, fullPage: true });
+        assert.ok(fs.statSync(vpShot).size > 10000);
+
         await page.getByRole('button', { name: 'Open navigation menu' }).click();
         await page.locator('nav[aria-label="Mobile navigation"]').waitFor();
         await page.getByRole('button', { name: 'Close navigation menu' }).click();
       }
 
       assert.deepEqual(pageErrors, [], `Unhandled page errors encountered: ${pageErrors.join(' | ')}`);
-      console.log('ALL PLAYWRIGHT E2E, RESPONSIVE & RBAC VERIFICATION CHECKS PASSED!');
+      assert.deepEqual(consoleErrors, [], `Console errors encountered: ${consoleErrors.join(' | ')}`);
+      console.log('ALL PLAYWRIGHT E2E, RESPONSIVE, RBAC & SCREENSHOT CHECKS PASSED!');
     } finally {
       await browser.close();
     }

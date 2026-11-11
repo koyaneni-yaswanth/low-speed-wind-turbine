@@ -19,3 +19,15 @@
 - **Zero Remote Control Surfaces:** Neither the public website nor the authenticated engineering dashboard implements remote turbine start, brake release, yaw actuation, or pitch override commands.
 - **Monitoring Only:** `brake_state`, `fault_code`, `temperature`, and overspeed indicators are strictly **read-only telemetry observability fields** until an independently reviewed safety controller architecture is approved.
 - **No Unverified Safety Certifications:** Website never claims IEC 61400-2 certification, IP65 storm certification, or utility grid-tie compliance.
+
+---
+
+## 3. Dated Security Hardening Verification Update (11 November 2026)
+
+| Security Control / Remediation | Classification | Concrete Verification |
+| :--- | :---: | :--- |
+| **Dependency Audit (`zod` upgraded to `>= 4.6.7`)** | **Implemented & Locally Tested** | Fixed `GHSA-mrhx-c7xc-m3w5` (`zod < 4.6.6` high memory exhaustion). `npm audit` reports **`0` vulnerabilities**. |
+| **Fail-Closed Default Profile Role (`public_visitor`)** | **Implemented & Locally Tested** | Fixed `api/_lib/db.ts` & `src/pages/AdminPortalPage.tsx` so missing `public.profiles` rows fail closed to `'public_visitor'` instead of `'team_member'`. |
+| **Full 36-Table RLS & Escalation Triggers (`002`)** | **Implemented & SQL-Checked** | Closed RLS policy gaps on all 36 tables; added `prevent_profile_role_escalation()` and `handle_new_auth_user()`. Live Postgres RLS = **NOT VERIFIED** pending Supabase setup. |
+| **Rate Limiting, Safe JSON Parsing & HTML Escaping** | **Implemented & Locally Tested** | Added `parseJsonBody()` (`400` on bad JSON), `escapeHtml()` in inquiry emails, duplicate active pilot rejection (`409`), sliding-window rate limits (`429`), zero-PII enforcement on `/api/analytics`, and telemetry error persistence (`device_errors`). |
+

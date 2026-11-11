@@ -33,15 +33,15 @@ All automated static, unit, security, SQL RLS, build, and real Chrome E2E checks
 
 1. **TypeScript Compiler (`npx tsc -b --force`):** Checks both frontend (`tsconfig.app.json`) and serverless backend (`tsconfig.node.json` covering `api/`) — **PASS (Exit 0, 0 errors)**.
 2. **Static Linter (`npm run lint` / `oxlint`):** **PASS (Exit 0, 0 errors, 0 warnings)**.
-3. **Node Unit, Physics, CSV, RBAC, API Security & SQL Completeness Suite (`npm test`):**
-   - Total tests: **`13` / `13` PASSED (`0` failed, `0` skipped)**:
-     - `tests/api_and_security.test.mjs` (`5` tests): RBAC matrix & `<= 12` Vercel function count & zero server secrets in `src/`; honest `503` unconfigured DB handling across all 5 DB endpoints; Pilot inquiry validation, honeypot rejection & 17-stage CRM updates; ESP32 HMAC-SHA256 telemetry ingestion, replay deduplication & `403` isolation; SQL schema & RLS completeness across all 35 tables.
+3. **Node Unit, Physics, CSV, RBAC, API Security & SQL Completeness Suite (`npm test` — Updated 11 Nov 2026):**
+   - Total tests: **`16` / `16` PASSED (`0` failed, `0` skipped)**:
+     - `tests/api_and_security.test.mjs` (`6` tests): RBAC matrix, fail-closed `'public_visitor'` default, `<= 12` Vercel function count & zero server secrets in `src/`; honest `503` unconfigured DB handling across all DB endpoints; Pilot inquiry validation, duplicate `409` rejection, honeypot & 17-stage CRM updates; ESP32 HMAC-SHA256 telemetry ingestion, device registration, replay deduplication & `403` isolation; SQL schema & RLS completeness across all **36 tables** (`001` + `002`); malformed JSON `400`, zero-PII analytics & premature run review blocking.
      - `tests/assets_integrity.test.mjs` (`3` tests): original asset preservation & `.docx`/agreement exclusion from public assets; 81-point `S1223.dat` & CAD manifest accuracy + CC-BY/duplicate tags; truthfulness baseline check.
-     - `tests/physics.test.mjs` (`5` tests): Wind physics calculator exact equations; Betz limit cap & negative validation; flagging `36.25 W` Mark-4 historical claim as Betz anomaly; ROI & DCF LCOE verification; Solar-Wind hybrid curve & ESP32 CSV parsing/binning.
+     - `tests/physics.test.mjs` (`7` tests): Wind physics calculator exact equations; Betz limit cap & negative validation; flagging `36.25 W` Mark-4 historical claim as Betz anomaly; ROI & DCF LCOE verification; Solar-Wind hybrid curve & ESP32 CSV parsing/binning; edge cases (zero wind/area, invalid density, impossible efficiency, unit conversions); missing CSV columns, invalid timestamps, outliers & 5,000-row dataset benchmark.
 4. **Real Headless Chrome Browser E2E, Responsive & WebGL Verification (`node scripts/e2e-verify.mjs`):**
    - Verified all 10 routes (`/`, `/technology`, `/products`, `/applications`, `/performance`, `/pilot`, `/about`, `/resources`, `/contact`, `/admin`) at `1440x900`, `768x1024`, and `375x812`:
-   - Verified **zero unhandled page errors**, **zero broken images**, **<= 2px horizontal overflow** across desktop/tablet/mobile, interactive Three.js 3D CAD viewer wireframe toggle, S1223 airfoil SVG plot, sample CSV Betz inspection, calculator tabs, Pilot form validation alert, mobile menu drawer toggle, and Chrome `/admin` RBAC toggle hiding CRM PII and Financials for `team_member`.
-5. **Production Vite Bundle (`npm run build`):** Built cleanly (`prebuild` synced 4 media, 2 PDFs, 81 airfoil points, 33 CAD assets; Vite transformed `2188` modules).
+   - Verified **zero console errors**, **zero unhandled page errors**, **zero broken images**, **<= 2px horizontal overflow** across desktop/tablet/mobile, interactive Three.js 3D CAD viewer (`+Zoom`, `-Zoom`, `Reset`, `Wireframe` toggle), S1223 airfoil SVG plot, Products filter & Resources search, sample CSV Betz inspection, calculator tabs, Pilot & Contact form validation alerts, mobile menu drawer toggle, Chrome `/admin` RBAC toggle, and real PNG viewport screenshots (`npm audit`: `0` vulnerabilities).
+5. **Production Vite Bundle (`npm run build`):** Built cleanly (`prebuild` synced 4 media, 2 drawings, 81 airfoil points, 33 CAD assets; Vite transformed `2273` modules in `3.73s`).
 
 ---
 

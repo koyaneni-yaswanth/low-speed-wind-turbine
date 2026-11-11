@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Lock, Unlock } from 'lucide-react';
 import { DATA_ROOM_CHECKLIST, INITIAL_GRANT_SCHEMES, RESOURCE_DOCUMENTS } from '../../data/pawanShaktiData.ts';
 import type { ResourceDocumentItem } from '../../types/index.ts';
@@ -10,14 +10,61 @@ export const GrantsDataRoomTab: React.FC<{
   canViewDataRoom: boolean;
   canManageCms: boolean;
   canViewAudit: boolean;
-}> = ({ canViewDataRoom, canManageCms, canViewAudit }) => {
+  accessToken?: string | null;
+}> = ({ canViewDataRoom, canManageCms, canViewAudit, accessToken }) => {
   const [docs, setDocs] = useState<ResourceDocumentItem[]>(RESOURCE_DOCUMENTS);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({
     'Published Indian Patent Documents (+ Official Application No.)': true,
     'Real Prototype Photographs (Mark-3 / Mark-4 / Mark-5)': true,
   });
 
   const analyticsEvents = getTrackedEvents();
+
+  useEffect(() => {
+    if (!canViewDataRoom || !accessToken) return;
+    let active = true;
+    (async () => {
+      try {
+        const resp = await fetch('/api/admin?action=grants_dataroom', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (active && resp.ok) {
+          const data = await resp.json();
+          if (Array.isArray(data.documents) && data.documents.length > 0) {
+            setDocs(
+              data.documents.map((d: any) => ({
+                id: d.id,
+                title: d.title,
+                category: d.category,
+                version: d.version,
+                visibility: d.visibility,
+                url: d.external_url || null,
+                sourcePath: d.storage_path || '',
+                publishedAt: d.created_at || '',
+                summary: d.summary || '',
+                evidenceTier: d.evidence_tier || 'ENGINEERING_ESTIMATE',
+              }))
+            );
+          }
+        }
+        if (canViewAudit) {
+          const aResp = await fetch('/api/admin?action=audit_logs', {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          if (active && aResp.ok) {
+            const aData = await aResp.json();
+            if (Array.isArray(aData.auditLogs)) setAuditLogs(aData.auditLogs);
+          }
+        }
+      } catch {
+        // offline gracefully handled
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [canViewDataRoom, canViewAudit, accessToken]);
 
   if (!canViewDataRoom) {
     return (
@@ -27,11 +74,18 @@ export const GrantsDataRoomTab: React.FC<{
     );
   }
 
-  const toggleDocVisibility = (id: string) => {
+  const toggleDocVisibility = async (id: string) => {
     if (!canManageCms) return;
-    setDocs((prev) =>
-      prev.map((d) => (d.id === id ? { ...d, visibility: d.visibility === 'public' ? 'private' : 'public' } : d))
-    );
+    const current = docs.find((d) => d.id === id);
+    const nextVis = current?.visibility === 'public' ? 'private' : 'public';
+    if (accessToken) {
+      await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ action: 'toggle_document_visibility', id, visibility: nextVis }),
+      }).catch(() => {});
+    }
+    setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, visibility: nextVis } : d)));
   };
 
   return (
@@ -156,8 +210,16 @@ export const GrantsDataRoomTab: React.FC<{
             <span className="text-[#434E4A]">(zero PII stored)</span>
           </div>
           {canViewAudit ? (
-            <div className="rounded-xl border border-[#DDE2DC] p-3 text-[#434E4A]">
-              Live database audit logs (`audit_logs`) require active authenticated Supabase JWT against <code>GET /api/admin?action=audit_logs</code>.
+            <div className="rounded-xl border border-[#DDE2DC] p-3 text-[#434E4A] space-y-1">
+              <div>
+                <strong>Database Audit Trail:</strong>{' '}
+                {auditLogs.length > 0
+                  ? `${auditLogs.length} immutable audit records fetched.`
+                  : 'Connect Supabase Auth JWT to load persisted audit_logs from GET /api/admin?action=audit_logs.'}
+              </div>
+              <div className="font-mono text-[10px]">
+                IPO Patent Record: &ldquo;Compact Wind Turbine with Planetary Gears&rdquo; (Published 2025 — Under Examination / NOT GRANTED)
+              </div>
             </div>
           ) : (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-900">

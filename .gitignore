@@ -38,8 +38,10 @@ dist/
 .env
 .env.local
 .env.*.local
+*.tsbuildinfo
 public/repo-assets/
 src/generated/
 playwright-report/
 test-results/
+scratch/
 

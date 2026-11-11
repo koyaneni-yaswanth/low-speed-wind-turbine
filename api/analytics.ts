@@ -1,16 +1,19 @@
 import { z } from 'zod';
 import {
   createSupabaseDbAdapter,
+  parseJsonBody,
   requirePermission,
   type DbAdapter,
   type ServerRequest,
   type ServerResponse,
 } from './_lib/db.ts';
 
+const FORBIDDEN_PII_KEYS = new Set(['email', 'phone', 'name', 'fullname', 'address', 'password', 'token', 'aadhaar', 'pan']);
+
 const eventSchema = z.object({
   event: z.string().trim().min(2).max(60),
   path: z.string().trim().min(1).max(200),
-  meta: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
+  meta: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
 });
 
 export function createAnalyticsHandler(dbFactory: () => DbAdapter = createSupabaseDbAdapter) {
@@ -24,10 +27,15 @@ export function createAnalyticsHandler(dbFactory: () => DbAdapter = createSupaba
     }
 
     if (req.method === 'POST') {
-      const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-      const parsed = eventSchema.safeParse(body);
+      const bodyParse = parseJsonBody(req);
+      if (!bodyParse.ok) return res.status(400).json({ error: bodyParse.error });
+      const parsed = eventSchema.safeParse(bodyParse.data);
       if (!parsed.success) {
         return res.status(400).json({ error: 'Invalid analytics event payload.' });
+      }
+      const metaKeys = Object.keys(parsed.data.meta || {});
+      if (metaKeys.some((k) => FORBIDDEN_PII_KEYS.has(k.toLowerCase()))) {
+        return res.status(400).json({ error: 'Analytics metadata must remain strictly zero-PII.' });
       }
       const { error } = await db.insertRow('analytics_events', {
         event_name: parsed.data.event,

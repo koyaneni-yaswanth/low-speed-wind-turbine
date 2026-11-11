@@ -9,8 +9,10 @@
 
 ### Step 1: Supabase Database Setup
 1. Create or select a dedicated Supabase project (PostgreSQL + Auth).
-2. Run migration [`supabase/migrations/001_pawan_shakti_platform.sql`](../supabase/migrations/001_pawan_shakti_platform.sql) in the **Supabase SQL Editor** (or via `npx supabase link --project-ref <ref> && npx supabase db push`).
-3. Verify **Authentication -> Providers**: enable Email/Password login and restrict public signup if using an invite-only admin portal.
+2. Run both idempotent migrations in order inside **Supabase SQL Editor** (or via `npx supabase link --project-ref <ref> && npx supabase db push`):
+   - [`supabase/migrations/001_pawan_shakti_platform.sql`](../supabase/migrations/001_pawan_shakti_platform.sql)
+   - [`supabase/migrations/002_pawan_shakti_hardening_and_completeness.sql`](../supabase/migrations/002_pawan_shakti_hardening_and_completeness.sql)
+3. Verify **Authentication -> Providers**: enable Email/Password login and restrict public signup if using an invite-only admin portal (new auth signups default strictly to `public_visitor`).
 
 ### Step 2: Assign Founder Super-Admin Role
 After creating your first admin account in Supabase Auth, assign the `founder_super_admin` profile record in SQL Editor:

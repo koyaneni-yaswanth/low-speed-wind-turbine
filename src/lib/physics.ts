@@ -141,18 +141,30 @@ export interface RoiResult {
 
 export function calculateRoiPayback(input: RoiInput): RoiResult {
   const errors: string[] = [];
-  if (input.systemPriceInr < 0 || input.installationCostInr < 0 || input.batteryInverterCostInr < 0) {
-    errors.push('Capital costs cannot be negative.');
+  if (
+    !Number.isFinite(input.systemPriceInr) ||
+    !Number.isFinite(input.installationCostInr) ||
+    !Number.isFinite(input.batteryInverterCostInr) ||
+    input.systemPriceInr < 0 ||
+    input.installationCostInr < 0 ||
+    input.batteryInverterCostInr < 0
+  ) {
+    errors.push('Capital costs must be valid non-negative numbers.');
   }
-  if (input.estimatedAnnualKwh < 0) errors.push('Estimated annual energy cannot be negative.');
-  if (input.electricityTariffInrKwh <= 0 || input.electricityTariffInrKwh > 100) {
+  if (!Number.isFinite(input.estimatedAnnualKwh) || input.estimatedAnnualKwh < 0) {
+    errors.push('Estimated annual energy cannot be negative.');
+  }
+  if (!Number.isFinite(input.electricityTariffInrKwh) || input.electricityTariffInrKwh <= 0 || input.electricityTariffInrKwh > 100) {
     errors.push('Electricity tariff must be > 0 and <= 100 INR/kWh.');
   }
-  if (input.selfConsumptionPct < 0 || input.selfConsumptionPct > 100) {
+  if (!Number.isFinite(input.selfConsumptionPct) || input.selfConsumptionPct < 0 || input.selfConsumptionPct > 100) {
     errors.push('Self-consumption percentage must be between 0% and 100%.');
   }
-  if (input.systemLifeYears < 1 || input.systemLifeYears > 35) {
+  if (!Number.isFinite(input.systemLifeYears) || input.systemLifeYears < 1 || input.systemLifeYears > 35) {
     errors.push('System life assumption must be between 1 and 35 years.');
+  }
+  if (!Number.isFinite(input.annualMaintenanceInr) || input.annualMaintenanceInr < 0 || !Number.isFinite(input.annualFinancingCostInr) || input.annualFinancingCostInr < 0) {
+    errors.push('Maintenance and financing costs cannot be negative.');
   }
 
   if (errors.length > 0) {
@@ -264,7 +276,18 @@ export interface LcoeDcfResult {
 }
 
 export function calculateLcoeDcf(input: LcoeDcfInput): LcoeDcfResult {
-  if (input.projectLifeYears < 1 || input.yearOneNetEnergyKwh <= 0 || input.availabilityPct <= 0) {
+  if (
+    !Number.isFinite(input.installedCapexInr) ||
+    !Number.isFinite(input.annualOmInr) ||
+    !Number.isFinite(input.projectLifeYears) ||
+    !Number.isFinite(input.yearOneNetEnergyKwh) ||
+    !Number.isFinite(input.availabilityPct) ||
+    input.installedCapexInr < 0 ||
+    input.annualOmInr < 0 ||
+    input.projectLifeYears < 1 ||
+    input.yearOneNetEnergyKwh <= 0 ||
+    input.availabilityPct <= 0
+  ) {
     return { valid: false, lcoeInrPerKwh: null, discountedTotalCostInr: 0, discountedTotalEnergyKwh: 0 };
   }
   const r = Math.max(0, input.discountRatePct) / 100;
@@ -291,6 +314,14 @@ export function calculateLcoeDcf(input: LcoeDcfInput): LcoeDcfResult {
   };
 }
 
+export function kmhToMs(kmh: number): number {
+  return Number.isFinite(kmh) && kmh >= 0 ? Number((kmh / 3.6).toFixed(4)) : 0;
+}
+
+export function rpmToRadPerSec(rpm: number): number {
+  return Number.isFinite(rpm) && rpm >= 0 ? Number(((rpm * 2 * Math.PI) / 60).toFixed(4)) : 0;
+}
+
 export function evaluateBetzPhysics(params: {
   windSpeedMs: number;
   sweptAreaM2: number;
@@ -305,14 +336,19 @@ export function evaluateBetzPhysics(params: {
   exceedsPracticalSmallWindCap: boolean;
 } {
   const rho = params.airDensityKgM3 ?? DEFAULT_AIR_DENSITY;
-  const measuredPowerW = Math.max(0, params.voltageV * params.currentA);
-  const availableWindPowerW = 0.5 * rho * params.sweptAreaM2 * Math.pow(Math.max(0, params.windSpeedMs), 3);
+  const safeRho = Number.isFinite(rho) && rho > 0 ? rho : DEFAULT_AIR_DENSITY;
+  const safeArea = Number.isFinite(params.sweptAreaM2) && params.sweptAreaM2 > 0 ? params.sweptAreaM2 : 0;
+  const safeWind = Number.isFinite(params.windSpeedMs) ? Math.max(0, params.windSpeedMs) : 0;
+  const safeV = Number.isFinite(params.voltageV) ? Math.max(0, params.voltageV) : 0;
+  const safeI = Number.isFinite(params.currentA) ? Math.max(0, params.currentA) : 0;
+  const measuredPowerW = safeV * safeI;
+  const availableWindPowerW = 0.5 * safeRho * safeArea * Math.pow(safeWind, 3);
   const cpRatio = availableWindPowerW > 0 ? measuredPowerW / availableWindPowerW : 0;
   return {
     measuredPowerW: Number(measuredPowerW.toFixed(2)),
     availableWindPowerW: Number(availableWindPowerW.toFixed(2)),
     cpRatio: Number(cpRatio.toFixed(4)),
-    exceedsBetzLimit: cpRatio > BETZ_LIMIT,
-    exceedsPracticalSmallWindCap: cpRatio > 0.35,
+    exceedsBetzLimit: availableWindPowerW > 0 ? cpRatio > BETZ_LIMIT : measuredPowerW > 0.1,
+    exceedsPracticalSmallWindCap: availableWindPowerW > 0 ? cpRatio > 0.35 : measuredPowerW > 0.1,
   };
 }

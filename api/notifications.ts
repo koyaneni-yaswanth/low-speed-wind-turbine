@@ -1,5 +1,6 @@
 import {
   createSupabaseDbAdapter,
+  parseJsonBody,
   recordAuditLog,
   requirePermission,
   type DbAdapter,
@@ -78,7 +79,9 @@ export function createNotificationsHandler(dbFactory: () => DbAdapter = createSu
       const writeAuth = requirePermission(actor, 'manage_cms_and_roles');
       if (!writeAuth.ok) return res.status(writeAuth.status).json({ error: writeAuth.error });
 
-      const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body) || {};
+      const bodyParse = parseJsonBody(req);
+      if (!bodyParse.ok) return res.status(400).json({ error: bodyParse.error });
+      const body = bodyParse.data;
       if (!body.to || !body.subject || !body.htmlBody) {
         return res.status(400).json({ error: 'Fields to, subject, and htmlBody are required.' });
       }

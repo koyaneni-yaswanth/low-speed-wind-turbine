@@ -1,11 +1,14 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Printer } from 'lucide-react';
 import { INITIAL_BOM_ITEMS, INITIAL_PROJECT_TASKS } from '../../data/pawanShaktiData.ts';
 import { calculateLcoeDcf } from '../../lib/physics.ts';
 import type { BomItem, ProjectTaskItem } from '../../types/index.ts';
 import { EvidenceBadge } from '../common/EvidenceBadge.tsx';
 
-export const FounderOperatingTab: React.FC<{ canViewFinancials: boolean }> = ({ canViewFinancials }) => {
+export const FounderOperatingTab: React.FC<{ canViewFinancials: boolean; accessToken?: string | null }> = ({
+  canViewFinancials,
+  accessToken,
+}) => {
   // Editable DCF LCOE inputs
   const [lcoeInput, setLcoeInput] = useState({
     installedCapexInr: 72000,
@@ -34,6 +37,66 @@ export const FounderOperatingTab: React.FC<{ canViewFinancials: boolean }> = ({ 
   const [sprintStartDate, setSprintStartDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [tasks, setTasks] = useState<ProjectTaskItem[]>(INITIAL_PROJECT_TASKS);
   const [trackFilter, setTrackFilter] = useState('ALL');
+  const [taskSyncNotice, setTaskSyncNotice] = useState('');
+
+  useEffect(() => {
+    if (!accessToken) return;
+    let active = true;
+    (async () => {
+      try {
+        const resp = await fetch('/api/admin', { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (!active || !resp.ok) return;
+        const data = await resp.json();
+        if (Array.isArray(data.tasks) && data.tasks.length > 0) {
+          setTasks(
+            data.tasks.map((t: any, idx: number) => ({
+              id: t.id,
+              taskCode: t.task_code || `T-${idx + 1}`,
+              workstream: t.workstream || t.track,
+              title: t.title,
+              description: t.description || '',
+              track: t.track,
+              owner: t.owner,
+              supportingMembers: Array.isArray(t.supporting_members) ? t.supporting_members : [],
+              priority: t.priority || 'P1',
+              offsetStartDay: idx * 3 + 1,
+              durationDays: 10,
+              status: t.status || 'todo',
+              dependencies: Array.isArray(t.dependencies) ? t.dependencies : [],
+              acceptanceCriteria: t.acceptance_criteria || '',
+              evidenceAttachment: t.evidence_attachment || '',
+              reviewer: t.reviewer || 'Founder',
+            }))
+          );
+          setTaskSyncNotice('Loaded tasks from Supabase.');
+        }
+      } catch {
+        if (active) setTaskSyncNotice('Cloud task fetch unavailable offline.');
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [accessToken]);
+
+  const handleTaskStatusChange = async (task: ProjectTaskItem, nextStatus: ProjectTaskItem['status']) => {
+    setTasks((prev) => prev.map((x) => (x.id === task.id ? { ...x, status: nextStatus } : x)));
+    if (accessToken) {
+      const resp = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          action: 'update_task',
+          id: task.id,
+          title: task.title,
+          track: task.track,
+          owner: task.owner,
+          status: nextStatus,
+        }),
+      });
+      if (resp.ok) setTaskSyncNotice(`Updated task status to ${nextStatus} in DB.`);
+    }
+  };
 
   const protoTotalBom = bomItems.reduce((s, i) => s + i.prototypeCostInr, 0);
   const targetTotalBom = bomItems.reduce((s, i) => s + i.targetCostInr, 0);
@@ -254,7 +317,7 @@ export const FounderOperatingTab: React.FC<{ canViewFinancials: boolean }> = ({ 
           </label>
         </div>
 
-        <div className="flex flex-wrap gap-2 text-xs">
+        <div className="flex flex-wrap gap-2 text-xs items-center">
           <select
             value={trackFilter}
             onChange={(e) => setTrackFilter(e.target.value)}
@@ -268,15 +331,20 @@ export const FounderOperatingTab: React.FC<{ canViewFinancials: boolean }> = ({ 
               </option>
             ))}
           </select>
+          <span className="font-mono text-[11px] text-[#434E4A]">
+            Accepted Deliverables: {tasks.filter((t) => t.status === 'done').length} / {tasks.length} • Blocked:{' '}
+            {tasks.filter((t) => t.status === 'blocked').length}
+          </span>
+          {taskSyncNotice && <span className="font-mono text-[11px] text-[#0B2B22]">{taskSyncNotice}</span>}
         </div>
 
         <div className="overflow-x-auto rounded-xl border border-[#DDE2DC]">
           <table className="w-full text-left text-xs">
             <thead className="bg-[#F6F7F4]">
               <tr>
-                <th className="px-3 py-2">Pri</th>
-                <th className="px-3 py-2">Task</th>
-                <th className="px-3 py-2">Track &amp; Owner</th>
+                <th className="px-3 py-2">ID / Pri</th>
+                <th className="px-3 py-2">Deliverable &amp; Acceptance Criteria</th>
+                <th className="px-3 py-2">Workstream / Owner / Reviewer</th>
                 <th className="px-3 py-2">Active Start -&gt; Due</th>
                 <th className="px-3 py-2">Status</th>
               </tr>
@@ -286,14 +354,18 @@ export const FounderOperatingTab: React.FC<{ canViewFinancials: boolean }> = ({ 
                 .filter((t) => trackFilter === 'ALL' || t.track === trackFilter)
                 .map((task) => (
                   <tr key={task.id}>
-                    <td className="px-3 py-2 font-mono font-bold">{task.priority}</td>
+                    <td className="px-3 py-2 font-mono font-bold whitespace-nowrap">
+                      {task.taskCode || task.id} • {task.priority}
+                    </td>
                     <td className="px-3 py-2">
                       <div className="font-semibold text-[#141A18]">{task.title}</div>
-                      <div className="text-[11px] text-[#434E4A]">{task.acceptanceCriteria}</div>
+                      <div className="text-[11px] text-[#434E4A]">Criteria: {task.acceptanceCriteria}</div>
                     </td>
                     <td className="px-3 py-2 text-[#434E4A]">
                       <div>{task.track}</div>
-                      <div className="font-mono text-[10px]">{task.owner}</div>
+                      <div className="font-mono text-[10px]">
+                        Owner: {task.owner} • Rev: {task.reviewer}
+                      </div>
                     </td>
                     <td className="px-3 py-2 font-mono text-[11px] whitespace-nowrap">
                       {computeDueDate(task.offsetStartDay)} → {computeDueDate(task.offsetStartDay + task.durationDays)}
@@ -301,13 +373,8 @@ export const FounderOperatingTab: React.FC<{ canViewFinancials: boolean }> = ({ 
                     <td className="px-3 py-2">
                       <select
                         value={task.status}
-                        onChange={(e) =>
-                          setTasks((prev) =>
-                            prev.map((x) =>
-                              x.id === task.id ? { ...x, status: e.target.value as ProjectTaskItem['status'] } : x
-                            )
-                          )
-                        }
+                        onChange={(e) => handleTaskStatusChange(task, e.target.value as ProjectTaskItem['status'])}
+                        aria-label={`Status for ${task.title}`}
                         className="rounded border border-[#DDE2DC] px-2 py-1 text-xs bg-white"
                       >
                         <option value="todo">todo</option>

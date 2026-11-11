@@ -44,6 +44,63 @@ export function getHeaderValue(headers: Record<string, string | string[] | undef
   return typeof raw === 'string' ? raw : '';
 }
 
+export function getClientIp(req: ServerRequest): string {
+  const forwarded = getHeaderValue(req.headers, 'x-forwarded-for');
+  if (forwarded) return forwarded.split(',')[0].trim() || 'unknown';
+  return getHeaderValue(req.headers, 'x-real-ip') || 'local';
+}
+
+export function parseJsonBody(req: ServerRequest): { ok: true; data: Record<string, any> } | { ok: false; error: string } {
+  if (req.body === undefined || req.body === null || req.body === '') {
+    return { ok: true, data: {} };
+  }
+  if (typeof req.body === 'string') {
+    try {
+      const parsed = JSON.parse(req.body);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return { ok: true, data: parsed as Record<string, any> };
+      }
+      return { ok: false, error: 'JSON request body must be an object.' };
+    } catch {
+      return { ok: false, error: 'Malformed JSON in request body.' };
+    }
+  }
+  if (typeof req.body === 'object' && !Array.isArray(req.body)) {
+    return { ok: true, data: req.body as Record<string, any> };
+  }
+  return { ok: false, error: 'Unsupported request body format.' };
+}
+
+export function escapeHtml(input: string): string {
+  return input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+const RATE_BUCKETS = new Map<string, { count: number; resetAt: number }>();
+
+export function checkRateLimit(
+  bucketKey: string,
+  maxRequests: number,
+  windowMs: number,
+  nowMs = Date.now()
+): { allowed: boolean; remaining: number; retryAfterSec: number } {
+  const existing = RATE_BUCKETS.get(bucketKey);
+  if (!existing || nowMs >= existing.resetAt) {
+    RATE_BUCKETS.set(bucketKey, { count: 1, resetAt: nowMs + windowMs });
+    return { allowed: true, remaining: Math.max(0, maxRequests - 1), retryAfterSec: 0 };
+  }
+  if (existing.count >= maxRequests) {
+    const retryAfterSec = Math.max(1, Math.ceil((existing.resetAt - nowMs) / 1000));
+    return { allowed: false, remaining: 0, retryAfterSec };
+  }
+  existing.count += 1;
+  return { allowed: true, remaining: Math.max(0, maxRequests - existing.count), retryAfterSec: 0 };
+}
+
 export interface AuthenticatedActor {
   userId: string;
   email: string;
@@ -79,7 +136,7 @@ export function createSupabaseDbAdapter(): DbAdapter {
         .eq('id', data.user.id)
         .maybeSingle();
 
-      const role = (profile?.role as UserRole | undefined) || 'team_member';
+      const role = (profile?.role as UserRole | undefined) || 'public_visitor';
       return {
         userId: data.user.id,
         email: profile?.email || data.user.email || 'unknown',
